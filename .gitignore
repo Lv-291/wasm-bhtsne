@@ -1,3 +1,10 @@
 /target
 Cargo.lock
 .DS_Store
+**/*.rs.bk
+bin/
+pkg/
+wasm-pack.log
+.idea
+www
+package-lock.json

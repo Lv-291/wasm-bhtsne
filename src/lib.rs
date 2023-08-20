@@ -20,7 +20,7 @@
 //!                               // original space.
 //! const THETA: f32 = 0.5;       // Parameter used by the Barnes-Hut algorithm.
 //!                               // Small values improve accuracy but increase complexity.
-//!    
+//!
 //! const PERPLEXITY: f32 = 10.0; // Perplexity of the conditional distribution.
 //! const EPOCHS: usize = 2000;   // Number of fitting iterations.
 //! const NO_DIMS: u8 = 2;        // Dimensionality of the embedded space.
@@ -52,6 +52,10 @@
 //! # Ok::<(), Box<dyn Error>>(())
 //! ```
 mod tsne;
+mod utils;
+
+use wasm_bindgen::prelude::*;
+
 
 #[cfg(test)]
 mod test;
