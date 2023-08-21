@@ -1,9 +1,12 @@
+
 mod tsne;
 mod utils;
+// mod distance_functions;
+// use distance_functions::DistanceFunction
 
 use wasm_bindgen::prelude::*;
 
-pub(crate) use num_traits::{cast::AsPrimitive, Float};
+
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -13,10 +16,7 @@ use rayon::{
 };
 #[cfg(feature = "csv")]
 use std::{error::Error, fs::File};
-use std::{
-    iter::Sum,
-    ops::{AddAssign, DivAssign, MulAssign, SubAssign},
-};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 /// t-distributed stochastic neighbor embedding. Provides a parallel implementation of both the
 /// exact version of the algorithm and the tree accelerated one leveraging space partitioning trees.
@@ -162,10 +162,8 @@ impl tSNE
     pub fn embedding(&self) -> Vec<f32> {
         self.y.iter().map(|x| x.0).collect()
     }
-}
 
-// this is the stuff that I haven't implemented in wasm yet
-impl tSNE {
+    #[wasm_bindgen]
     /// Performs a parallel exact version of the t-SNE algorithm. Pairwise distances between samples
     /// in the input space will be computed accordingly to the supplied function `distance_f`.
     ///
@@ -176,11 +174,10 @@ impl tSNE {
     /// **Do note** that such a distance function needs not to be a metric distance, i.e. it is not
     /// necessary for it so satisfy the triangle inequality. Consequently, the squared euclidean
     /// distance, and many other, can be used.
-    pub fn exact<F>(&mut self, distance_f: F)
-        where F: Fn(&&[f32], &&[f32]) -> f32 + Send + Sync
-    {
-        let data = self.data.clone();
-        let n_samples = self.data.len(); // Number of samples in data.
+    pub fn exact(&mut self) {
+        let vectors: Vec<&[f32]> = self.data.chunks(self.d).collect();
+        let n_samples = vectors.len(); // Number of samples in data.
+
 
         // Checks that the supplied perplexity is suitable for the number of samples at hand.
         tsne::check_perplexity(&self.perplexity, &n_samples);
@@ -215,11 +212,18 @@ impl tSNE {
         // Compute pairwise distances in parallel with the user supplied function.
         // Only upper triangular entries, excluding the diagonal are computed: flat indexes are
         // unraveled to pick such entries.
-        let vectors: Vec<&[f32]> = data.chunks(self.d).collect();
+
 
         tsne::compute_pairwise_distance_matrix(
             &mut distances,
-            distance_f,
+            |sample_a: &&[f32], sample_b: &&[f32]| {
+                sample_a
+                    .iter()
+                    .zip(sample_b.iter())
+                    .map(|(&a, &b)| (a - b).powi(2))
+                    .sum::<f32>()
+                    .sqrt()
+            },
             |index| &vectors[*index],
             &n_samples,
         );
@@ -336,8 +340,10 @@ impl tSNE {
         // Clears buffers used for fitting.
         tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
     }
+}
 
-
+// this is the stuff that I haven't implemented in wasm yet
+impl tSNE {
     /// Writes the embedding to a csv file. If the embedding space dimensionality is either equal to
     /// 2 or 3 the resulting csv file will have some simple headers:
     ///
