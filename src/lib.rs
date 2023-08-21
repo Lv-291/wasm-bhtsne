@@ -1,10 +1,9 @@
 mod tsne;
+
+mod distance_funtions;
+use distance_funtions::DistanceFunction;
 mod utils;
-// mod distance_functions;
-// use distance_functions::DistanceFunction
 
-
-pub(crate) use num_traits::{cast::AsPrimitive};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -12,8 +11,6 @@ use rayon::{
     },
     slice::{ParallelSlice, ParallelSliceMut},
 };
-#[cfg(feature = "csv")]
-use std::{error::Error, fs::File};
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -40,6 +37,7 @@ pub struct tSNE {
     dy: Vec<tsne::Aligned<f32>>,
     uy: Vec<tsne::Aligned<f32>>,
     gains: Vec<tsne::Aligned<f32>>,
+    distance_f: fn(&&[f32], &&[f32]) -> f32,
 }
 #[wasm_bindgen]
 impl tSNE {
@@ -65,6 +63,7 @@ impl tSNE {
             dy: Vec::new(),
             uy: Vec::new(),
             gains: Vec::new(),
+            distance_f: DistanceFunction::Euclidean.get_closure(),
         }
     }
     #[wasm_bindgen(setter)]
@@ -211,14 +210,7 @@ impl tSNE {
 
         tsne::compute_pairwise_distance_matrix(
             &mut distances,
-            |sample_a: &&[f32], sample_b: &&[f32]| {
-                sample_a
-                    .iter()
-                    .zip(sample_b.iter())
-                    .map(|(&a, &b)| (a - b).powi(2))
-                    .sum::<f32>()
-                    .sqrt()
-            },
+            self.distance_f,
             |index| &vectors[*index],
             &n_samples,
         );
@@ -368,7 +360,7 @@ impl tSNE {
 
         let embedding_dim = self.embedding_dim as usize;
         // Number of  points ot consider when approximating the conditional distribution P.
-        let n_neighbors: usize = (3.0f32 * self.perplexity).as_();
+        let n_neighbors: usize = (3.0f32 * self.perplexity) as usize;
         // NUmber of entries in gradient and gains matrices.
         let grad_entries = n_samples * embedding_dim;
         // Number of entries in pairwise measures matrices.
@@ -398,15 +390,10 @@ impl tSNE {
             // Distances buffer.
             let mut distances: Vec<tsne::Aligned<f32>> = vec![0.0f32.into(); pairwise_entries];
 
+            let metric_f = self.distance_f;
+
             // Build ball tree on data set. The tree is freed at the end of the scope.
-            let tree = tsne::VPTree::new(&vectors, |sample_a: &&[f32], sample_b: &&[f32]| {
-                sample_a
-                    .iter()
-                    .zip(sample_b.iter())
-                    .map(|(&a, &b)| (a - b).powi(2))
-                    .sum::<f32>()
-                    .sqrt()
-            });
+            let tree = tsne::VPTree::new(&vectors, self.distance_f);
 
             // For each sample in the dataset compute the perplexities using a vantage point tree
             // in parallel.
@@ -427,14 +414,7 @@ impl tSNE {
                                 n_neighbors + 1, // The first NN is sample itself.
                                 p_columns_row,
                                 distances_row,
-                                |sample_a: &&[f32], sample_b: &&[f32]| {
-                                    sample_a
-                                        .iter()
-                                        .zip(sample_b.iter())
-                                        .map(|(&a, &b)| (a - b).powi(2))
-                                        .sum::<f32>()
-                                        .sqrt()
-                                },
+                                metric_f,
                             );
                             debug_assert!(!p_columns_row.iter().any(|i| i.0 == index));
                             tsne::search_beta(p_values_row, distances_row, perplexity);
@@ -559,104 +539,5 @@ impl tSNE {
         }
         // Clears buffers used for fitting.
         tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
-    }
-}
-
-// this is the stuff that I haven't implemented in wasm yet
-impl tSNE {
-    /// Writes the embedding to a csv file. If the embedding space dimensionality is either equal to
-    /// 2 or 3 the resulting csv file will have some simple headers:
-    ///
-    /// * x, y for 2 dimensions.
-    ///
-    /// * x, y, z for 3 dimensions.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_path` - path of the file to write the embedding to.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error is something goes wrong during the I/O operations.
-    #[cfg(feature = "csv")]
-    pub fn write_csv<'a>(&'a mut self, path: &str) -> Result<&'a mut Self, Box<dyn Error>> {
-        let mut writer = csv::Writer::from_path(path)?;
-
-        // String-ify the embedding.
-        let to_write = self
-            .y
-            .iter()
-            .map(|el| el.0.to_string())
-            .collect::<Vec<String>>();
-
-        // Write headers.
-        match self.embedding_dim {
-            2 => writer.write_record(&["x", "y"])?,
-            3 => writer.write_record(&["x", "y", "z"])?,
-            _ => (), // Write no headers for embedding dimensions greater that 3.
-        }
-        // Write records.
-        for record in to_write.chunks(self.embedding_dim as usize) {
-            writer.write_record(record)?
-        }
-        // Final flush.
-        writer.flush()?;
-        // Everything went smooth.
-        Ok(self)
-    }
-
-    /// Loads data from a csv file.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_path` - path of the file to load the data from.
-    ///
-    /// * `has_headers` - whether the file has headers or not. if set to `true` the function will
-    /// not parse the first line of the csv file.
-    ///
-    /// * `skip` - an optional slice that specifies a subset of the file columns that must not be
-    /// parsed.
-    ///
-    /// * `f` - function that converts [`String`] into a data sample. It takes as an argument a single
-    /// record field.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error is something goes wrong during the I/O operations.
-    #[cfg(feature = "csv")]
-    pub fn load_csv<T, F: Fn(String) -> f32>(
-        path: &str,
-        has_headers: bool,
-        skip: Option<&[usize]>,
-        f: F,
-    ) -> Result<Vec<f32>, Box<dyn Error>> {
-        let mut data: Vec<f32> = Vec::new();
-
-        let file = File::open(path)?;
-
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(has_headers)
-            .from_reader(file);
-
-        match skip {
-            Some(range) => {
-                for result in reader.records() {
-                    let record = result?;
-
-                    (0..record.len())
-                        .filter(|column| !range.contains(column))
-                        .for_each(|field| data.push(f(record.get(field).unwrap().to_string())));
-                }
-            }
-            None => {
-                for result in reader.records() {
-                    let record = result?;
-
-                    (0..record.len())
-                        .for_each(|field| data.push(f(record.get(field).unwrap().to_string())));
-                }
-            }
-        }
-        Ok(data)
     }
 }
