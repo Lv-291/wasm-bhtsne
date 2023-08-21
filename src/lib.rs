@@ -1,7 +1,7 @@
 mod tsne;
 
-mod distance_funtions;
-use distance_funtions::DistanceFunction;
+mod distance_functions;
+use distance_functions::DistanceFunction;
 mod utils;
 
 use rayon::{
