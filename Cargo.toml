@@ -1,11 +1,12 @@
 [package]
 name = "wasm-bhtsne"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["lv291 <baiunco291@proton.me>"]
 description = "Exact and Barnes-Hut implementations of t-SNE in wasm"
 license = "MIT"
 repository = "https://github.com/Lv-291/wasm-bhtsne"
 edition = "2018"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
