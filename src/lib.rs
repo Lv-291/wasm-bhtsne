@@ -4,6 +4,8 @@ mod distance_functions;
 use distance_functions::DistanceFunction;
 mod utils;
 
+use js_sys::Array;
+
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -27,7 +29,7 @@ pub struct tSNE {
     final_momentum: f32,
     momentum_switch_epoch: usize,
     stop_lying_epoch: usize,
-    embedding_dim: u8,
+    embedding_dim: usize,
     perplexity: f32,
     p_values: Vec<tsne::Aligned<f32>>,
     p_rows: Vec<usize>,
@@ -42,11 +44,12 @@ pub struct tSNE {
 #[wasm_bindgen]
 impl tSNE {
     #[wasm_bindgen(constructor)]
-    pub fn new(data: Vec<f32>, d: usize) -> tSNE {
+    pub fn new(vectors: Array) -> tSNE {
         utils::set_panic_hook();
+
         tSNE {
-            data,
-            d,
+            data: utils::convert_array_to_vec(&vectors),
+            d: utils::get_num_cols(&vectors),
             learning_rate: 200.0,
             epochs: 1000,
             momentum: 0.5,
@@ -66,98 +69,6 @@ impl tSNE {
             distance_f: DistanceFunction::Euclidean.get_closure(),
         }
     }
-    #[wasm_bindgen(setter)]
-    /// Sets a new learning rate.
-    ///
-    /// # Arguments
-    ///
-    /// `learning_rate` - new value for the learning rate.
-    pub fn set_learning_rate(&mut self, learning_rate: f32) {
-        self.learning_rate = learning_rate;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets new epochs, i.e the maximum number of fitting iterations.
-    ///
-    /// # Arguments
-    ///
-    /// `epochs` - new value for the epochs.
-    pub fn set_epochs(&mut self, epochs: usize) {
-        self.epochs = epochs;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets a new momentum.
-    ///
-    /// # Arguments
-    ///
-    /// `momentum` - new value for the momentum.
-    pub fn set_momentum(&mut self, momentum: f32) {
-        self.momentum = momentum;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets a new final momentum.
-    ///
-    /// # Arguments
-    ///
-    /// `final_momentum` - new value for the final momentum.
-    pub fn set_final_momentum(&mut self, final_momentum: f32) {
-        self.final_momentum = final_momentum;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets a new momentum switch epoch, i.e. the epoch after which the algorithm switches to
-    /// `final_momentum` for the map update.
-    ///
-    /// # Arguments
-    ///
-    /// `momentum_switch_epoch` - new value for the momentum switch epoch.
-    pub fn set_momentum_switch_epoch(&mut self, momentum_switch_epoch: usize) {
-        self.momentum_switch_epoch = momentum_switch_epoch;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets a new stop lying epoch, i.e. the epoch after which the P distribution values become
-    /// true, as defined in the original implementation. For epochs < `stop_lying_epoch` the values
-    /// of the P distribution are multiplied by a factor equal to `12.0`.
-    ///
-    /// # Arguments
-    ///
-    /// `stop_lying_epoch` - new value for the stop lying epoch.
-    pub fn set_stop_lying_epoch(&mut self, stop_lying_epoch: usize) {
-        self.stop_lying_epoch = stop_lying_epoch;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets a new value for the embedding dimension.
-    ///
-    /// # Arguments
-    ///
-    /// `embedding_dim` - new value for the embedding space dimensionality.
-    pub fn set_embedding_dim(&mut self, embedding_dim: u8) {
-        self.embedding_dim = embedding_dim;
-    }
-
-    #[wasm_bindgen(setter)]
-    /// Sets a new perplexity value.
-    ///
-    /// # Arguments
-    ///
-    /// `perplexity` - new value for the perplexity. It's used so that the bandwidth of the Gaussian
-    ///  kernels, is set in such a way that the perplexity of each the conditional distribution *Pi*
-    ///  equals a predefined perplexity *u*.
-    ///
-    /// A good value for perplexity lies between 5.0 and 50.0.
-    pub fn set_perplexity(&mut self, perplexity: f32) {
-        self.perplexity = perplexity;
-    }
-
-    #[wasm_bindgen]
-    /// Returns the computed embedding.
-    pub fn embedding(&self) -> Vec<f32> {
-        self.y.iter().map(|x| x.0).collect()
-    }
 
     #[wasm_bindgen]
     /// Performs a parallel exact version of the t-SNE algorithm. Pairwise distances between samples
@@ -170,7 +81,7 @@ impl tSNE {
     /// **Do note** that such a distance function needs not to be a metric distance, i.e. it is not
     /// necessary for it so satisfy the triangle inequality. Consequently, the squared euclidean
     /// distance, and many other, can be used.
-    pub fn exact(&mut self) {
+    pub fn exact(&mut self) -> Array {
         let vectors: Vec<&[f32]> = self.data.chunks(self.d).collect();
         let n_samples = vectors.len(); // Number of samples in data.
 
@@ -326,6 +237,8 @@ impl tSNE {
         }
         // Clears buffers used for fitting.
         tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
+
+        self.embedding()
     }
 
     #[wasm_bindgen]
@@ -344,7 +257,7 @@ impl tSNE {
     ///
     /// **Do note that** `metric_f` **must be a metric distance**, i.e. it must
     /// satisfy the [triangle inequality](https://en.wikipedia.org/wiki/Triangle_inequality).
-    pub fn barnes_hut(&mut self, theta: f32) {
+    pub fn barnes_hut(&mut self, theta: f32) -> Array {
         // Checks that theta is valid.
         assert!(
             theta > 0.0,
@@ -358,7 +271,7 @@ impl tSNE {
         // Checks that the supplied perplexity is suitable for the number of samples at hand.
         tsne::check_perplexity(&self.perplexity, &n_samples);
 
-        let embedding_dim = self.embedding_dim as usize;
+        let embedding_dim = self.embedding_dim;
         // Number of  points ot consider when approximating the conditional distribution P.
         let n_neighbors: usize = (3.0f32 * self.perplexity) as usize;
         // NUmber of entries in gradient and gains matrices.
@@ -539,5 +452,101 @@ impl tSNE {
         }
         // Clears buffers used for fitting.
         tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
+
+        self.embedding()
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new learning rate.
+    ///
+    /// # Arguments
+    ///
+    /// `learning_rate` - new value for the learning rate.
+    pub fn set_learning_rate(&mut self, learning_rate: f32) {
+        self.learning_rate = learning_rate;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets new epochs, i.e the maximum number of fitting iterations.
+    ///
+    /// # Arguments
+    ///
+    /// `epochs` - new value for the epochs.
+    pub fn set_epochs(&mut self, epochs: usize) {
+        self.epochs = epochs;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new momentum.
+    ///
+    /// # Arguments
+    ///
+    /// `momentum` - new value for the momentum.
+    pub fn set_momentum(&mut self, momentum: f32) {
+        self.momentum = momentum;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new final momentum.
+    ///
+    /// # Arguments
+    ///
+    /// `final_momentum` - new value for the final momentum.
+    pub fn set_final_momentum(&mut self, final_momentum: f32) {
+        self.final_momentum = final_momentum;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new momentum switch epoch, i.e. the epoch after which the algorithm switches to
+    /// `final_momentum` for the map update.
+    ///
+    /// # Arguments
+    ///
+    /// `momentum_switch_epoch` - new value for the momentum switch epoch.
+    pub fn set_momentum_switch_epoch(&mut self, momentum_switch_epoch: usize) {
+        self.momentum_switch_epoch = momentum_switch_epoch;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new stop lying epoch, i.e. the epoch after which the P distribution values become
+    /// true, as defined in the original implementation. For epochs < `stop_lying_epoch` the values
+    /// of the P distribution are multiplied by a factor equal to `12.0`.
+    ///
+    /// # Arguments
+    ///
+    /// `stop_lying_epoch` - new value for the stop lying epoch.
+    pub fn set_stop_lying_epoch(&mut self, stop_lying_epoch: usize) {
+        self.stop_lying_epoch = stop_lying_epoch;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new value for the embedding dimension.
+    ///
+    /// # Arguments
+    ///
+    /// `embedding_dim` - new value for the embedding space dimensionality.
+    pub fn set_embedding_dim(&mut self, embedding_dim: usize) {
+        self.embedding_dim = embedding_dim;
+    }
+
+    #[wasm_bindgen(setter)]
+    /// Sets a new perplexity value.
+    ///
+    /// # Arguments
+    ///
+    /// `perplexity` - new value for the perplexity. It's used so that the bandwidth of the Gaussian
+    ///  kernels, is set in such a way that the perplexity of each the conditional distribution *Pi*
+    ///  equals a predefined perplexity *u*.
+    ///
+    /// A good value for perplexity lies between 5.0 and 50.0.
+    pub fn set_perplexity(&mut self, perplexity: f32) {
+        self.perplexity = perplexity;
+    }
+
+    #[wasm_bindgen]
+    /// Returns the computed embedding.
+    pub fn embedding(&self) -> Array {
+        let result_data: Vec<f32> = self.y.iter().map(|x| x.0).collect();
+        utils::convert_to_array_of_arrays(result_data, self.embedding_dim)
     }
 }

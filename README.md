@@ -21,16 +21,16 @@ npm i wasm-bhtsne
 ```javascript
 import {tSNE} from "wasm-bhtsne";
 
-const data = [];
-
-for (let i = 0; i < 300; i++) {
-    const randomNumber = Math.random();
-    data.push(randomNumber);
+function createRandomMatrix(rows, columns) {
+    return Array.from({ length: rows }, () =>
+        Array.from({ length: columns }, () => Math.random())
+    );
 }
 
-const tsne_encoder = new tSNE(data, 4);
-tsne_encoder.exact();
-const embedded_stuff = tsne_encoder.embedding();
+const data = createRandomMatrix(500, 4);
 
-console.log(embedded_stuff);
+const tsne_encoder = new tSNE(data);
+const compressed_vectors = tsne_encoder.barnes_hut(0.5);
+
+console.log(compressed_vectors);
 ```
