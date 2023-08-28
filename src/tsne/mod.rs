@@ -548,7 +548,7 @@ where
 {
     // Get estimate of normalization term.
     let q_sum = {
-        let tree = SPTree::new(&embedding_dim, &y, &n_samples);
+        let tree = SPTree::new(embedding_dim, y, n_samples);
         let mut q_sums: Vec<Aligned<T>> = vec![T::zero().into(); *n_samples];
 
         let mut buffer: Vec<Aligned<T>> = vec![T::zero().into(); n_samples * *embedding_dim];
@@ -561,7 +561,7 @@ where
             .zip(buffer.par_chunks_mut(*embedding_dim))
             .enumerate()
             .for_each(|(index, ((sum, negative_forces_row), buffer_row))| {
-                tree.compute_non_edge_forces(index, &theta, negative_forces_row, buffer_row, sum);
+                tree.compute_non_edge_forces(index, theta, negative_forces_row, buffer_row, sum);
             });
 
         q_sums.par_iter().map(|sum| sum.0).sum::<T>()

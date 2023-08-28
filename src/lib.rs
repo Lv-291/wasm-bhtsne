@@ -24,7 +24,6 @@ pub struct tSNE {
     data: Vec<f32>,
     d: usize,
     learning_rate: f32,
-    epochs: usize,
     momentum: f32,
     final_momentum: f32,
     momentum_switch_epoch: usize,
@@ -34,24 +33,30 @@ pub struct tSNE {
     p_values: Vec<tsne::Aligned<f32>>,
     p_rows: Vec<usize>,
     p_columns: Vec<usize>,
-    q_values: Vec<tsne::Aligned<f32>>,
     y: Vec<tsne::Aligned<f32>>,
     dy: Vec<tsne::Aligned<f32>>,
     uy: Vec<tsne::Aligned<f32>>,
     gains: Vec<tsne::Aligned<f32>>,
     distance_f: fn(&&[f32], &&[f32]) -> f32,
+    positive_forces: Vec<tsne::Aligned<f32>>,
+    negative_forces: Vec<tsne::Aligned<f32>>,
+    forces_buffer: Vec<tsne::Aligned<f32>>,
+    q_sums: Vec<tsne::Aligned<f32>>,
+    means: Vec<f32>,
+    n_samples: usize,
+    theta: f32,
 }
+
 #[wasm_bindgen]
 impl tSNE {
     #[wasm_bindgen(constructor)]
     pub fn new(vectors: Array) -> tSNE {
         utils::set_panic_hook();
 
-        tSNE {
+        let mut tsne = tSNE {
             data: utils::convert_array_to_vec(&vectors),
             d: utils::get_num_cols(&vectors),
             learning_rate: 200.0,
-            epochs: 1000,
             momentum: 0.5,
             final_momentum: 0.8,
             momentum_switch_epoch: 250,
@@ -61,40 +66,40 @@ impl tSNE {
             p_values: Vec::new(),
             p_rows: Vec::new(),
             p_columns: Vec::new(),
-            q_values: Vec::new(),
             y: Vec::new(),
             dy: Vec::new(),
             uy: Vec::new(),
             gains: Vec::new(),
             distance_f: DistanceFunction::Euclidean.get_closure(),
-        }
+            positive_forces: Vec::new(),
+            negative_forces: Vec::new(),
+            forces_buffer: Vec::new(),
+            q_sums: Vec::new(),
+            means: Vec::new(),
+            n_samples: 0,
+            theta: 1.0,
+        };
+
+        tsne.barnes_hut_data();
+        tsne
     }
 
-    #[wasm_bindgen]
-    /// Performs a parallel exact version of the t-SNE algorithm. Pairwise distances between samples
-    /// in the input space will be computed accordingly to the supplied function `distance_f`.
-    ///
-    /// # Arguments
-    ///
-    /// `distance_f` - distance function.
-    ///
-    /// **Do note** that such a distance function needs not to be a metric distance, i.e. it is not
-    /// necessary for it so satisfy the triangle inequality. Consequently, the squared euclidean
-    /// distance, and many other, can be used.
-    pub fn exact(&mut self) -> Array {
+    fn barnes_hut_data(&mut self) {
+
         let vectors: Vec<&[f32]> = self.data.chunks(self.d).collect();
-        let n_samples = vectors.len(); // Number of samples in data.
+        self.n_samples = vectors.len(); // Number of samples in data.
 
         // Checks that the supplied perplexity is suitable for the number of samples at hand.
-        tsne::check_perplexity(&self.perplexity, &n_samples);
+        tsne::check_perplexity(&self.perplexity, &self.n_samples);
 
-        let embedding_dim = self.embedding_dim as usize;
+        // Number of  points ot consider when approximating the conditional distribution P.
+        let n_neighbors: usize = (3.0f32 * self.perplexity) as usize;
         // NUmber of entries in gradient and gains matrices.
-        let grad_entries = n_samples * embedding_dim;
+        let grad_entries = self.n_samples * self.embedding_dim;
         // Number of entries in pairwise measures matrices.
-        let pairwise_entries = n_samples * n_samples;
+        let pairwise_entries = self.n_samples * n_neighbors;
 
-        // Prepares the buffers.
+        // Prepare buffers
         tsne::prepare_buffers(
             &mut self.y,
             &mut self.dy,
@@ -102,182 +107,9 @@ impl tSNE {
             &mut self.gains,
             &grad_entries,
         );
-        // Prepare distributions matrices.
-        self.p_values.resize(pairwise_entries, 0.0f32.into()); // P.
-        self.q_values.resize(pairwise_entries, 0.0f32.into()); // Q.
-
-        // Alignment prevents false sharing.
-        let mut distances: Vec<tsne::Aligned<f32>> = vec![0.0f32.into(); pairwise_entries];
-        // Zeroes the diagonal entries. The distances vector is recycled but the elements
-        // corresponding to the diagonal entries of the distance matrix are always kept to 0. and
-        // never written on. This hold as an invariant through all the algorithm.
-        for i in 0..n_samples {
-            distances[i * n_samples + i] = 0.0f32.into();
-        }
-
-        // Compute pairwise distances in parallel with the user supplied function.
-        // Only upper triangular entries, excluding the diagonal are computed: flat indexes are
-        // unraveled to pick such entries.
-
-        tsne::compute_pairwise_distance_matrix(
-            &mut distances,
-            self.distance_f,
-            |index| &vectors[*index],
-            &n_samples,
-        );
-
-        // Compute gaussian perplexity in parallel. First, the conditional distribution is computed
-        // for each element. Each row of the P matrix is independent from the others, thus, this
-        // computation is accordingly parallelized.
-        {
-            let perplexity = &self.perplexity;
-            self.p_values
-                .par_chunks_mut(n_samples)
-                .zip(distances.par_chunks(n_samples))
-                .for_each(|(p_values_row, distances_row)| {
-                    tsne::search_beta(p_values_row, distances_row, perplexity);
-                });
-        }
-
-        // Symmetrize pairwise input similarities. Conditional probabilities must be summed to
-        // obtain the joint P distribution.
-        for i in 0..n_samples {
-            for j in (i + 1)..n_samples {
-                let symmetric = self.p_values[j * n_samples + i].0;
-                self.p_values[i * n_samples + j].0 += symmetric;
-                self.p_values[j * n_samples + i].0 = self.p_values[i * n_samples + j].0;
-            }
-        }
-
-        // Normalize P values.
-        tsne::normalize_p_values(&mut self.p_values);
-
-        // Initialize solution randomly.
-        tsne::random_init(&mut self.y);
-
-        // Vector used to store the mean values for each embedding dimension. It's used
-        // to make the solution zero mean.
-        let mut means: Vec<f32> = vec![0.0f32; embedding_dim];
-
-        // Main fitting loop.
-        for epoch in 0..self.epochs {
-            // Compute pairwise squared euclidean distances between embeddings in parallel.
-            tsne::compute_pairwise_distance_matrix(
-                &mut distances,
-                |ith: &[tsne::Aligned<f32>], jth: &[tsne::Aligned<f32>]| {
-                    ith.iter()
-                        .zip(jth.iter())
-                        .map(|(i, j)| (i.0 - j.0).powi(2))
-                        .sum()
-                },
-                |index| &self.y[index * embedding_dim..index * embedding_dim + embedding_dim],
-                &n_samples,
-            );
-
-            // Computes Q.
-            self.q_values
-                .par_iter_mut()
-                .zip(distances.par_iter())
-                .for_each(|(q, d)| q.0 = 1.0f32 / (1.0f32 + d.0));
-
-            // Computes the exact gradient in parallel.
-            let q_values_sum: f32 = self.q_values.par_iter().map(|q| q.0).sum();
-
-            // Immutable borrow to self must happen outside of the inner sequential
-            // loop. The outer parallel loop already has a mutable borrow.
-            let y = &self.y;
-            self.dy
-                .par_chunks_mut(embedding_dim)
-                .zip(self.y.par_chunks(embedding_dim))
-                .zip(self.p_values.par_chunks(n_samples))
-                .zip(self.q_values.par_chunks(n_samples))
-                .for_each(
-                    |(((dy_sample, y_sample), p_values_sample), q_values_sample)| {
-                        p_values_sample
-                            .iter()
-                            .zip(q_values_sample.iter())
-                            .zip(y.chunks(embedding_dim))
-                            .for_each(|((p, q), other_sample)| {
-                                let m: f32 = (p.0 - q.0 / q_values_sum) * q.0;
-                                dy_sample
-                                    .iter_mut()
-                                    .zip(y_sample.iter())
-                                    .zip(other_sample.iter())
-                                    .for_each(|((dy_el, y_el), other_el)| {
-                                        dy_el.0 += (y_el.0 - other_el.0) * m
-                                    });
-                            });
-                    },
-                );
-
-            // Updates the embedding in parallel with gradient descent.
-            tsne::update_solution(
-                &mut self.y,
-                &self.dy,
-                &mut self.uy,
-                &mut self.gains,
-                &self.learning_rate,
-                &self.momentum,
-            );
-            // Zeroes the gradient.
-            self.dy.iter_mut().for_each(|el| el.0 = 0.0f32);
-
-            // Make solution zero mean.
-            tsne::zero_mean(&mut means, &mut self.y, &n_samples, &embedding_dim);
-
-            // Stop lying about the P-values if the time is right.
-            if epoch == self.stop_lying_epoch {
-                tsne::stop_lying(&mut self.p_values);
-            }
-
-            // Switches momentum if the time is right.
-            if epoch == self.momentum_switch_epoch {
-                self.momentum = self.final_momentum;
-            }
-        }
-        // Clears buffers used for fitting.
-        tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
-
-        self.embedding()
-    }
-
-    #[wasm_bindgen]
-    /// Performs a parallel Barnes-Hut approximation of the t-SNE algorithm.
-    ///
-    /// # Arguments
-    ///
-    /// * `theta` - determines the accuracy of the approximation. Must be **strictly greater than
-    /// 0.0**. Large values for θ increase the speed of the algorithm but decrease its accuracy.
-    /// For small values of θ it is less probable that a cell in the space partitioning tree will
-    /// be treated as a single point. For θ equal to 0.0 the method degenerates in the exact
-    /// version.
-    ///
-    /// * `metric_f` - metric function.
-    ///
-    ///
-    /// **Do note that** `metric_f` **must be a metric distance**, i.e. it must
-    /// satisfy the [triangle inequality](https://en.wikipedia.org/wiki/Triangle_inequality).
-    pub fn barnes_hut(&mut self, theta: f32) -> Array {
-        // Checks that theta is valid.
-        assert!(
-            theta > 0.0,
-            "error: theta value must be greater than 0.0.
-            A value of 0.0 corresponds to using the exact version of the algorithm."
-        );
-
-        let vectors: Vec<&[f32]> = self.data.chunks(self.d).collect();
-        let n_samples = vectors.len(); // Number of samples in data.
-
-        // Checks that the supplied perplexity is suitable for the number of samples at hand.
-        tsne::check_perplexity(&self.perplexity, &n_samples);
-
-        let embedding_dim = self.embedding_dim;
-        // Number of  points ot consider when approximating the conditional distribution P.
-        let n_neighbors: usize = (3.0f32 * self.perplexity) as usize;
-        // NUmber of entries in gradient and gains matrices.
-        let grad_entries = n_samples * embedding_dim;
-        // Number of entries in pairwise measures matrices.
-        let pairwise_entries = n_samples * n_neighbors;
+        // The P distribution values are restricted to a subset of size n_neighbors for each input
+        // sample.
+        self.p_values.resize(pairwise_entries, 0.0f32.into());
 
         // Prepare buffers
         tsne::prepare_buffers(
@@ -342,7 +174,7 @@ impl tSNE {
             &mut self.p_columns,
             p_columns,
             &mut self.p_values,
-            n_samples,
+            self.n_samples,
             &n_neighbors,
         );
 
@@ -353,20 +185,47 @@ impl tSNE {
         tsne::random_init(&mut self.y);
 
         // Prepares buffers for Barnes-Hut algorithm.
-        let mut positive_forces: Vec<tsne::Aligned<f32>> = vec![0.0f32.into(); grad_entries];
-        let mut negative_forces: Vec<tsne::Aligned<f32>> = vec![0.0f32.into(); grad_entries];
-        let mut forces_buffer: Vec<tsne::Aligned<f32>> = vec![0.0f32.into(); grad_entries];
-        let mut q_sums: Vec<tsne::Aligned<f32>> = vec![0.0f32.into(); n_samples];
+        self.positive_forces = vec![0.0f32.into(); grad_entries];
+        self.negative_forces = vec![0.0f32.into(); grad_entries];
+        self.forces_buffer = vec![0.0f32.into(); grad_entries];
+        self.q_sums = vec![0.0f32.into(); self.n_samples];
 
         // Vector used to store the mean values for each embedding dimension. It's used
         // to make the solution zero mean.
-        let mut means: Vec<f32> = vec![0.0f32; embedding_dim];
+        self.means = vec![0.0f32; self.embedding_dim];
+    }
+
+    #[wasm_bindgen]
+    /// Performs a parallel Barnes-Hut approximation of the t-SNE algorithm.
+    ///
+    /// # Arguments
+    ///
+    /// * `theta` - determines the accuracy of the approximation. Must be **strictly greater than
+    /// 0.0**. Large values for θ increase the speed of the algorithm but decrease its accuracy.
+    /// For small values of θ it is less probable that a cell in the space partitioning tree will
+    /// be treated as a single point. For θ equal to 0.0 the method degenerates in the exact
+    /// version.
+    ///
+    /// * `metric_f` - metric function.
+    ///
+    ///
+    /// **Do note that** `metric_f` **must be a metric distance**, i.e. it must
+    /// satisfy the [triangle inequality](https://en.wikipedia.org/wiki/Triangle_inequality).
+    pub fn barnes_hut(&mut self, epochs: usize) -> Array {
+        // Checks that theta is valid.
+
+
+        let mut positive_forces = self.positive_forces.clone();
+        let mut negative_forces = self.negative_forces.clone();
+        let mut forces_buffer = self.forces_buffer.clone();
+        let mut q_sums = self.q_sums.clone();
+        let mut means = self.means.clone();
 
         // Main Training loop.
-        for epoch in 0..self.epochs {
+        for epoch in 0..epochs {
             {
                 // Construct space partitioning tree on current embedding.
-                let tree = tsne::SPTree::new(&embedding_dim, &self.y, &n_samples);
+                let tree = tsne::SPTree::new(&self.embedding_dim, &self.y, &self.n_samples);
                 // Check if the SPTree is correct.
                 debug_assert!(tree.is_correct(), "error: SPTree is not correct.");
 
@@ -375,23 +234,23 @@ impl tSNE {
                 // embedded sample in y. As a consequence of this the computation can be done in
                 // parallel.
                 positive_forces
-                    .par_chunks_mut(embedding_dim)
-                    .zip(negative_forces.par_chunks_mut(embedding_dim))
-                    .zip(forces_buffer.par_chunks_mut(embedding_dim))
+                    .par_chunks_mut(self.embedding_dim)
+                    .zip(negative_forces.par_chunks_mut(self.embedding_dim))
+                    .zip(forces_buffer.par_chunks_mut(self.embedding_dim))
                     .zip(q_sums.par_iter_mut())
-                    .zip(self.y.par_chunks(embedding_dim))
+                    .zip(self.y.par_chunks(self.embedding_dim))
                     .enumerate()
                     .for_each(
                         |(
-                            index,
-                            (
-                                (
-                                    ((positive_forces_row, negative_forces_row), forces_buffer_row),
-                                    q_sum,
-                                ),
-                                sample,
-                            ),
-                        )| {
+                             index,
+                             (
+                                 (
+                                     ((positive_forces_row, negative_forces_row), forces_buffer_row),
+                                     q_sum,
+                                 ),
+                                 sample,
+                             ),
+                         )| {
                             tree.compute_edge_forces(
                                 index,
                                 sample,
@@ -403,7 +262,7 @@ impl tSNE {
                             );
                             tree.compute_non_edge_forces(
                                 index,
-                                &theta,
+                                &self.theta,
                                 negative_forces_row,
                                 forces_buffer_row,
                                 q_sum,
@@ -438,7 +297,7 @@ impl tSNE {
             );
 
             // Make solution zero-mean.
-            tsne::zero_mean(&mut means, &mut self.y, &n_samples, &embedding_dim);
+            tsne::zero_mean(&mut means, &mut self.y, &self.n_samples, &self.embedding_dim);
 
             // Stop lying about the P-values if the time is right.
             if epoch == self.stop_lying_epoch {
@@ -450,8 +309,12 @@ impl tSNE {
                 self.momentum = self.final_momentum;
             }
         }
-        // Clears buffers used for fitting.
-        tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
+
+        self.positive_forces = positive_forces;
+        self.negative_forces = negative_forces;
+        self.forces_buffer = forces_buffer;
+        self.q_sums = q_sums;
+        self.means = means;
 
         self.embedding()
     }
@@ -466,14 +329,15 @@ impl tSNE {
         self.learning_rate = learning_rate;
     }
 
+
     #[wasm_bindgen(setter)]
-    /// Sets new epochs, i.e the maximum number of fitting iterations.
-    ///
-    /// # Arguments
-    ///
-    /// `epochs` - new value for the epochs.
-    pub fn set_epochs(&mut self, epochs: usize) {
-        self.epochs = epochs;
+    pub fn set_theta(&mut self, theta: f32) {
+        assert!(
+            theta > 0.0,
+            "error: theta value must be greater than 0.0.
+            A value of 0.0 corresponds to using the exact version of the algorithm."
+        );
+        self.theta = theta;
     }
 
     #[wasm_bindgen(setter)]
