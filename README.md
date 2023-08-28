@@ -19,7 +19,7 @@ npm i wasm-bhtsne
 ### Example
 
 ```javascript
-import {tSNE} from "wasm-bhtsne";
+import { tSNE } from "wasm-bhtsne";
 
 function createRandomMatrix(rows, columns) {
     return Array.from({ length: rows }, () =>
@@ -27,10 +27,22 @@ function createRandomMatrix(rows, columns) {
     );
 }
 
-const data = createRandomMatrix(500, 4);
+const data = createRandomMatrix(5000, 512);
+
+const startTime = performance.now();
 
 const tsne_encoder = new tSNE(data);
-const compressed_vectors = tsne_encoder.barnes_hut(0.5);
 
-console.log(compressed_vectors);
+let compressed_vectors = []
+
+for (let i = 0; i < 1000; i++) {
+    compressed_vectors = tsne_encoder.barnes_hut(1);
+}
+
+
+const endTime = performance.now();
+const executionTime = endTime - startTime;
+
+console.log("Compressed Vectors:", compressed_vectors);
+console.log("Execution Time:", executionTime, "ms");
 ```
