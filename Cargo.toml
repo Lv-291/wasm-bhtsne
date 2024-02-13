@@ -1,6 +1,6 @@
 [package]
 name = "wasm-bhtsne"
-version = "0.2.1"
+version = "0.3.1"
 authors = ["lv291 <baiunco291@proton.me>"]
 description = "Exact and Barnes-Hut implementations of t-SNE in wasm"
 license = "MIT"
@@ -9,30 +9,21 @@ edition = "2018"
 readme = "README.md"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-
-[features]
-default = ["console_error_panic_hook"]
+crate-type = ["cdylib"]
 
 [dependencies]
+rayon = { version = "1.8.1", features = ["web_spin_lock"] }
+wasm-bindgen-rayon = { version = "1.2.1", optional = true}
 wasm-bindgen = "0.2.84"
 getrandom = { version = "0.2.3", default-features=false, features=["js"] }
 num-traits = "0.2.15"
 rand = "0.8.5"
 rand_distr = "0.4.3"
-rayon = "1.5.3"
 js-sys = "0.3.64"
 
-# The `console_error_panic_hook` crate provides better debugging of panics by
-# logging them with `console.error`. This is great for development, but requires
-# all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
-# code size when deploying.
-console_error_panic_hook = { version = "0.1.7", optional = true }
-
-[dev-dependencies]
-wasm-bindgen-test = "0.3.34"
+[features]
+parallel = ["wasm-bindgen-rayon"]
 
 [profile.release]
-# Tell `rustc` to optimize for small code size.
 opt-level = 's'
 

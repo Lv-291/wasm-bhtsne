@@ -16,6 +16,9 @@ use rayon::{
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
+#[cfg(feature = "parallel")]
+pub use wasm_bindgen_rayon::init_thread_pool;
+
 /// t-distributed stochastic neighbor embedding. Provides a parallel implementation of both the
 /// exact version of the algorithm and the tree accelerated one leveraging space partitioning trees.
 #[wasm_bindgen]

@@ -121,7 +121,7 @@ impl<'a, T: Float + Send + Sync, U> VPTree<'a, T, U> {
             // Lower index is center of current node.
             if upper != lower {
                 *root = Some(Box::new(Node::new()));
-                let mut node = root.as_deref_mut().unwrap();
+                let node = root.as_deref_mut().unwrap();
                 node.index = lower;
 
                 if upper - lower > 1 {

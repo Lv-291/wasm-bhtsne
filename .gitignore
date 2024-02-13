@@ -7,4 +7,5 @@ pkg/
 wasm-pack.log
 .idea
 www
-package-lock.json
+node_modules
+dist
