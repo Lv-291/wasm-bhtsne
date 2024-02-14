@@ -1,8 +1,4 @@
-import init, { initThreadPool, tSNE } from "./pkg-parallel/wasm_bhtsne.js";
-
-await init();
-
-//await initThreadPool(navigator.hardwareConcurrency);
+import { threads } from 'wasm-feature-detect';
 
 function createRandomMatrix(rows, columns) {
     return Array.from({ length: rows }, () =>
@@ -10,20 +6,35 @@ function createRandomMatrix(rows, columns) {
     );
 }
 
-const timeOutput = /** @type {HTMLOutputElement} */ (
-    document.getElementById('time')
-);
+(async function initMultiThread() {
+  if (!(await threads())) return;
+  const multiThread = await import('./pkg-parallel/wasm_bhtsne.js');
+  await multiThread.default();
+  await multiThread.initThreadPool(navigator.hardwareConcurrency);
 
-// create random points and dimensions
-const data = createRandomMatrix(500, 4);
+  Object.assign(document.getElementById("wasm-bhtsne"), {
+    async onclick() {
+      const timeOutput = /** @type {HTMLOutputElement} */ (
+          document.getElementById('time')
+      );
 
-const tsne_encoder = new tSNE(data);
-tsne_encoder.perplexity = 10.0;
+      // create random points and dimensions
+      const data = createRandomMatrix(5000, 60);
 
-const start = performance.now();
-const compressed_vectors = tsne_encoder.barnes_hut(1000);
-const time = performance.now() - start;
+      let tsne_encoder = new multiThread.tSNE(data);
+      tsne_encoder.perplexity = 10.0;
 
-timeOutput.value = `${time.toFixed(2)} ms`;
+      const start = performance.now();
+      let compressed_vectors;
+      for (let i = 0; i < 1000; i++) {
+        compressed_vectors = tsne_encoder.barnes_hut(1);
+      }
+      const time = performance.now() - start;
 
-console.log("Compressed Vectors:", compressed_vectors);
+      timeOutput.value = `${time.toFixed(2)} ms`;
+      console.log("Compressed Vectors:", compressed_vectors);
+    },
+    disabled: false
+  });
+})();
+

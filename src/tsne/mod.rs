@@ -73,7 +73,7 @@ pub(super) fn prepare_buffers<T: Float + Send + Sync>(
     uy.resize(*grad_entries, T::zero().into()); // Momentum buffer.
     gains.resize(*grad_entries, T::one().into()); // Gains.
 }
-
+#[allow(dead_code)]
 /// Empties the buffers after the termination of the algorithm. Frees memory allocated by
 /// `prepare_buffers`.
 ///
