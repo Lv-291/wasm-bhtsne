@@ -45,9 +45,9 @@ function createRandomMatrix(rows, columns) {
 
     const start = performance.now();
     let compressed_vectors;
-    for (let i = 0; i < 1000; i++) {
-        compressed_vectors = tsne_encoder.barnes_hut(1);
-    }
+
+    compressed_vectors = tsne_encoder.barnes_hut(1000);
+    
     const time = performance.now() - start;
 
     timeOutput.value = `${time.toFixed(2)} ms`;
