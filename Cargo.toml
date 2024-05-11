@@ -9,7 +9,8 @@ edition = "2018"
 readme = "README.md"
 
 [lib]
-crate-type = ["cdylib"]
+# rlib: to ensure that our library can be unit tested with wasm-pack test
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rayon = { version = "1.8.1", features = ["web_spin_lock"] }
