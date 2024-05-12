@@ -24,12 +24,11 @@ function createRandomMatrix(rows, columns) {
       console.log("Ok");
       // create random points and dimensions
       const data = createRandomMatrix(50, 7);
-
-      let tsne_encoder = new multiThread.tSNE(data);
-      tsne_encoder.perplexity = 10.0;
+      let tsne_encoder = new multiThread.tSNE;
+      //tsne_encoder.learning_rate()
 
       const start = performance.now();
-      let compressed_vectors = tsne_encoder.barnes_hut(1000);
+      //let compressed_vectors = tsne_encoder.barnes_hut(1000);
       const time = performance.now() - start;
 
       timeOutput.value = `${time.toFixed(2)} ms`;
