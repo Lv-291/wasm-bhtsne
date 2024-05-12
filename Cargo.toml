@@ -15,7 +15,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rayon = { version = "1.8.1", features = ["web_spin_lock"] }
 wasm-bindgen-rayon = { version = "1.2.1", optional = true}
-wasm-bindgen = { version = "0.2.84"}
+wasm-bindgen = "0.2.84"
 getrandom = { version = "0.2.3", default-features=false, features=["js"] }
 num-traits = "0.2.15"
 rand = "0.8.5"
