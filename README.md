@@ -27,30 +27,27 @@ function createRandomMatrix(rows, columns) {
     );
 }
 
-(async function initWasmBhtsne() {
+(async function initMultiThread() {
     if (!(await threads())) return;
-    const bhtsne = await import('./pkg-parallel/wasm_bhtsne.js');
-    await bhtsne.default();
-    await bhtsne.initThreadPool(navigator.hardwareConcurrency);
+    const multiThread = await import('./pkg-parallel/wasm_bhtsne.js');
+    await multiThread.default();
+    if (await threads()) {
+        await multiThread.initThreadPool(navigator.hardwareConcurrency);
+    }
 
-    const timeOutput = /** @type {HTMLOutputElement} */ (
-        document.getElementById('time')
-    );
+    Object.assign(document.getElementById("wasm-bhtsne"), {
+        async onclick() {
 
-    // create random points and dimensions
-    const data = createRandomMatrix(5000, 60);
+            // create random points and dimensions
+            const data = createRandomMatrix(500, 7);
 
-    let tsne_encoder = new bhtsne.tSNE(data);
-    tsne_encoder.perplexity = 10.0;
+            let tsne_encoder = new multiThread.tSNE(data);
+            tsne_encoder.perplexity = 10.0;
 
-    const start = performance.now();
-    let compressed_vectors;
-
-    compressed_vectors = tsne_encoder.barnes_hut(1000);
-    
-    const time = performance.now() - start;
-
-    timeOutput.value = `${time.toFixed(2)} ms`;
-    console.log("Compressed Vectors:", compressed_vectors);
+            let compressed_vectors = tsne_encoder.barnes_hut(1000);
+            console.log("Compressed Vectors:", compressed_vectors);
+        },
+        disabled: false
+    });
 })();
 ```
