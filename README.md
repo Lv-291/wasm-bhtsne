@@ -1,10 +1,8 @@
-<div align="center"> <h1 align="center"> wasm-bhtsne </h1> </div>
-
-<div align="center">
+<div style="text-align: center;">
+  <h1>wasm-bhtsne</h1>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-</div>
+</div>[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 This is the wasm version of the [bhtsne](https://github.com/frjnn/bhtsne) crate.
 
