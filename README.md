@@ -28,7 +28,6 @@ function createRandomMatrix(rows, columns) {
 }
 
 (async function initMultiThread() {
-    if (!(await threads())) return;
     const multiThread = await import('./pkg-parallel/wasm_bhtsne.js');
     await multiThread.default();
     if (await threads()) {
