@@ -26,11 +26,13 @@ function createRandomMatrix(rows, columns) {
 }
 
 (async function initMultiThread() {
-    if (!(await threads())) return;
     const multiThread = await import('./pkg-parallel/wasm_bhtsne.js');
     await multiThread.default();
     if (await threads()) {
+        console.log("Browser supports threads");
         await multiThread.initThreadPool(navigator.hardwareConcurrency);
+    } else {
+        console.log("Browser does not support threads");
     }
 
     Object.assign(document.getElementById("wasm-bhtsne"), {
