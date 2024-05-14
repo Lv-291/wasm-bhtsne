@@ -21,15 +21,16 @@ function createRandomMatrix(rows, columns) {
           document.getElementById('time')
       );
 
-      console.log("Ok");
       // create random points and dimensions
-      const data = createRandomMatrix(50, 7);
-      let tsne_encoder = new multiThread.tSNE;
+      const data = createRandomMatrix(151, 4);
+      let tsne_encoder = new multiThread.bhtSNE(data);
       //tsne_encoder.learning_rate()
 
       const start = performance.now();
-      //let compressed_vectors = tsne_encoder.barnes_hut(1000);
+      tsne_encoder.run(0.5);
+      let compressed_vectors = tsne_encoder.embedding();
       const time = performance.now() - start;
+      tsne_encoder.free();
 
       timeOutput.value = `${time.toFixed(2)} ms`;
       console.log("Compressed Vectors:", compressed_vectors);

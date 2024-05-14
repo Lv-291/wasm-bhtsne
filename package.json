@@ -5,6 +5,7 @@
     "build:wasm-mt": "cross-env RUSTFLAGS=\"-C target-feature=+atomics,+bulk-memory,+mutable-globals\" rustup run nightly-2022-12-12 wasm-pack build --target web --out-dir pkg-parallel -- --features parallel -Z build-std=panic_abort,std",
     "build:wasm": "run-p build:wasm-st build:wasm-mt",
     "build": "npm run build:wasm && webpack build ./index.js --mode production -o dist --output-filename index.js && shx cp index.html dist/",
+    "test": "wasm-pack test --node --headless --firefox",
     "server": "serve --config ../serve.json dist/"
   },
   "devDependencies": {
