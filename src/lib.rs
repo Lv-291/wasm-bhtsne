@@ -1,8 +1,4 @@
-mod distance_functions;
-use distance_functions::DistanceFunction;
 mod utils;
-
-use js_sys::Array;
 
 #[cfg(test)]
 mod test;
@@ -11,51 +7,87 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "parallel")]
 pub use wasm_bindgen_rayon::init_thread_pool;
-
 mod tsne;
 
+use crate::utils::set_panic_hook;
 pub(crate) use num_traits::{cast::AsPrimitive, Float};
 use rayon::{
     iter::{
-        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
-        ParallelIterator,
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+        IntoParallelRefMutIterator, ParallelIterator,
     },
     slice::{ParallelSlice, ParallelSliceMut},
 };
-#[cfg(feature = "csv")]
-use std::{error::Error, fs::File};
 use std::{
     iter::Sum,
     ops::{AddAssign, DivAssign, MulAssign, SubAssign},
 };
-use wasm_bindgen::JsCast;
 
 /// t-distributed stochastic neighbor embedding. Provides a parallel implementation of both the
 /// exact version of the algorithm and the tree accelerated one leveraging space partitioning trees.
 
 #[wasm_bindgen]
-pub struct tSNE {
-    tsne_encoder: tsne_encoder<'static, f32, f32>,
+#[allow(non_camel_case_types)]
+pub struct bhtSNE {
+    tsne_encoder: tsne_encoder<f32>,
 }
 #[wasm_bindgen]
-impl tSNE {
-    #[wasm_bindgen]
-    pub fn new(data: Vec<Vec<f32>>) -> Self {
+impl bhtSNE {
+    #[wasm_bindgen(constructor)]
+    pub fn new(data: JsValue) -> Self {
+        set_panic_hook();
 
-        Self {
-            tsne_encoder: tsne_encoder::new(&[0.])
-        }
+        let converted_data: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(data).unwrap();
+        let d: usize = converted_data[0].len();
+
+        let flattened_array: Vec<f32> = converted_data
+            .into_par_iter()
+            .flat_map(|inner_vec| inner_vec.into_par_iter())
+            .collect();
+
+        let tsne = tsne_encoder::new(flattened_array, d);
+        Self { tsne_encoder: tsne }
+    }
+    #[wasm_bindgen]
+    pub fn step(&mut self, theta: f32) {
+        self.tsne_encoder.barnes_hut(theta, |sample_a, sample_b| {
+            sample_a
+                .iter()
+                .zip(sample_b.iter())
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f32>()
+                .sqrt()
+        });
+    }
+    #[wasm_bindgen]
+    pub fn get_solution(&self) -> Vec<f32> {
+        self.tsne_encoder.y.iter().map(|x| x.0).collect()
     }
 }
 
-
-#[allow(non_camel_case_types)]
-pub struct tsne_encoder<'data, T, U>
+struct TsneBuilder<'data, U>
 where
-    T: Send + Sync + Float + Sum + DivAssign + MulAssign + AddAssign + SubAssign,
     U: Send + Sync,
 {
     data: &'data [U],
+}
+
+impl<'data, U> TsneBuilder<'data, U>
+where
+    U: Send + Sync,
+{
+    pub fn new(data: &'data [U]) -> Self {
+        Self { data }
+    }
+}
+
+#[allow(non_camel_case_types)]
+pub struct tsne_encoder<T>
+where
+    T: Send + Sync + Float + Sum + DivAssign + MulAssign + AddAssign + SubAssign,
+{
+    data: Vec<T>,
+    d: usize,
     learning_rate: T,
     epochs: usize,
     momentum: T,
@@ -67,14 +99,13 @@ where
     p_values: Vec<tsne::Aligned<T>>,
     p_rows: Vec<usize>,
     p_columns: Vec<usize>,
-    q_values: Vec<tsne::Aligned<T>>,
     y: Vec<tsne::Aligned<T>>,
     dy: Vec<tsne::Aligned<T>>,
     uy: Vec<tsne::Aligned<T>>,
     gains: Vec<tsne::Aligned<T>>,
 }
 
-impl<'data, T, U> tsne_encoder<'data, T, U>
+impl<T> tsne_encoder<T>
 where
     T: Float
         + Send
@@ -85,11 +116,11 @@ where
         + AddAssign
         + MulAssign
         + SubAssign,
-    U: Send + Sync,
 {
-    pub fn new(data: &'data [U]) -> Self {
+    pub fn new(data: Vec<T>, d: usize) -> Self {
         Self {
             data,
+            d,
             learning_rate: T::from(200.0).unwrap(),
             epochs: 1000,
             momentum: T::from(0.5).unwrap(),
@@ -101,15 +132,11 @@ where
             p_values: Vec::new(),
             p_rows: Vec::new(),
             p_columns: Vec::new(),
-            q_values: Vec::new(),
             y: Vec::new(),
             dy: Vec::new(),
             uy: Vec::new(),
             gains: Vec::new(),
         }
-    }
-    pub fn embedding(&self) -> Vec<T> {
-        self.y.iter().map(|x| x.0).collect()
     }
 
     /// Performs a parallel Barnes-Hut approximation of the t-SNE algorithm.
@@ -127,7 +154,7 @@ where
     ///
     /// **Do note that** `metric_f` **must be a metric distance**, i.e. it must
     /// satisfy the [triangle inequality](https://en.wikipedia.org/wiki/Triangle_inequality).
-    pub fn barnes_hut<F: Fn(&U, &U) -> T + Send + Sync>(
+    pub fn barnes_hut<F: Fn(&&[T], &&[T]) -> T + Send + Sync>(
         &mut self,
         theta: T,
         metric_f: F,
@@ -139,8 +166,10 @@ where
             A value of 0.0 corresponds to using the exact version of the algorithm."
         );
 
-        let data = self.data;
-        let n_samples = self.data.len(); // Number of samples in data.
+        let samples: Vec<&[T]> = self.data.chunks(self.d).collect::<Vec<&[T]>>();
+        let tsne_builder = TsneBuilder::new(&samples);
+        let data = tsne_builder.data;
+        let n_samples = tsne_builder.data.len(); // Number of samples in data.
 
         // Checks that the supplied perplexity is suitable for the number of samples at hand.
         tsne::check_perplexity(&self.perplexity, &n_samples);
@@ -326,116 +355,9 @@ where
         tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
         self
     }
-
-
-    /// Writes the embedding to a csv file. If the embedding space dimensionality is either equal to
-    /// 2 or 3 the resulting csv file will have some simple headers:
-    ///
-    /// * x, y for 2 dimensions.
-    ///
-    /// * x, y, z for 3 dimensions.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_path` - path of the file to write the embedding to.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error is something goes wrong during the I/O operations.
-    #[cfg(feature = "csv")]
-    pub fn write_csv<'a>(&'a mut self, path: &str) -> Result<&'a mut Self, Box<dyn Error>>
-        where
-            T: Float + ToString,
-    {
-        let mut writer = csv::Writer::from_path(path)?;
-
-        // String-ify the embedding.
-        let to_write = self
-            .y
-            .iter()
-            .map(|el| el.0.to_string())
-            .collect::<Vec<String>>();
-
-        // Write headers.
-        match self.embedding_dim {
-            2 => writer.write_record(&["x", "y"])?,
-            3 => writer.write_record(&["x", "y", "z"])?,
-            _ => (), // Write no headers for embedding dimensions greater that 3.
-        }
-        // Write records.
-        for record in to_write.chunks(self.embedding_dim as usize) {
-            writer.write_record(record)?
-        }
-        // Final flush.
-        writer.flush()?;
-        // Everything went smooth.
-        Ok(self)
-    }
 }
 
-
-/// Returns the computed embedding.
-
-/// Loads data from a csv file.
-///
-/// # Arguments
-///
-/// * `file_path` - path of the file to load the data from.
-///
-/// * `has_headers` - whether the file has headers or not. if set to `true` the function will
-/// not parse the first line of the csv file.
-///
-/// * `skip` - an optional slice that specifies a subset of the file columns that must not be
-/// parsed.
-///
-/// * `f` - function that converts [`String`] into a data sample. It takes as an argument a single
-/// record field.
-///
-/// # Errors
-///
-/// Returns an error is something goes wrong during the I/O operations.
-#[cfg(feature = "csv")]
-pub fn load_csv<T, F: Fn(String) -> T>(
-    path: &str,
-    has_headers: bool,
-    skip: Option<&[usize]>,
-    f: F,
-) -> Result<Vec<T>, Box<dyn Error>> {
-    let mut data: Vec<T> = Vec::new();
-
-    let file = File::open(path)?;
-
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(has_headers)
-        .from_reader(file);
-
-    match skip {
-        Some(range) => {
-            for result in reader.records() {
-                let record = result?;
-
-                (0..record.len())
-                    .filter(|column| !range.contains(column))
-                    .for_each(|field| data.push(f(record.get(field).unwrap().to_string())));
-            }
-        }
-        None => {
-            for result in reader.records() {
-                let record = result?;
-
-                (0..record.len())
-                    .for_each(|field| data.push(f(record.get(field).unwrap().to_string())));
-            }
-        }
-    }
-    Ok(data)
-}
-
-
-
-
-impl tSNE {
-
+impl bhtSNE {
     /// Sets a new learning rate.
     ///
     /// # Arguments
