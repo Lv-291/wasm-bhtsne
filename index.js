@@ -22,13 +22,14 @@ function createRandomMatrix(rows, columns) {
       );
 
       // create random points and dimensions
-      const data = createRandomMatrix(151, 4);
+      const data = createRandomMatrix(5000, 512);
+
+
+      const start = performance.now();
       let tsne_encoder = new multiThread.bhtSNE(data);
       //tsne_encoder.learning_rate()
 
-      const start = performance.now();
-      tsne_encoder.run(0.5);
-      let compressed_vectors = tsne_encoder.embedding();
+      let compressed_vectors = tsne_encoder.step();
       const time = performance.now() - start;
       tsne_encoder.free();
 
