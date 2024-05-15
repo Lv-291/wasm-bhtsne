@@ -23,15 +23,14 @@ function createRandomMatrix(rows, columns) {
 
       // create random points and dimensions
       const data = createRandomMatrix(5000, 512);
-
-
+      
       const start = performance.now();
       let tsne_encoder = new multiThread.bhtSNE(data);
       //tsne_encoder.learning_rate()
 
-      let compressed_vectors = tsne_encoder.step();
+      let compressed_vectors = tsne_encoder.step(1000);
       const time = performance.now() - start;
-      tsne_encoder.free();
+      //tsne_encoder.free();
 
       timeOutput.value = `${time.toFixed(2)} ms`;
       console.log("Compressed Vectors:", compressed_vectors);

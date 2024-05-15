@@ -1,4 +1,3 @@
-
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use super::{bhtSNE, tsne};
@@ -142,14 +141,13 @@ fn barnes_hut_tsne() {
 
     let mut tsne: bhtSNE = bhtSNE::new(data_js);
 
-    let embedding_js = tsne.step().unwrap();
+    let embedding_js = tsne.step(1000).unwrap();
     let embedding_rs: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(embedding_js).unwrap();
     let flattened_array: Vec<f32> = embedding_rs
         .into_par_iter()
         .flat_map(|inner_vec| inner_vec.into_par_iter())
         .collect();
     let points: Vec<_> = flattened_array.chunks(NO_DIMS as usize).collect();
-
 
     assert_eq!(points.len(), samples.len());
 
