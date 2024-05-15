@@ -40,10 +40,11 @@ function createRandomMatrix(rows, columns) {
             // create random points and dimensions
             const data = createRandomMatrix(500, 7);
 
-            let tsne_encoder = new multiThread.tSNE(data);
-            tsne_encoder.perplexity = 10.0;
+            let tsne_encoder = new multiThread.bhtSNE(data); // create a tSNE instance
+            tsne_encoder.perplexity = 25.0;  // change hyperparameters
 
-            let compressed_vectors = tsne_encoder.barnes_hut(1000);
+            // run the algorithm with 1000 iterations 
+            let compressed_vectors = tsne_encoder.step(1000); 
             console.log("Compressed Vectors:", compressed_vectors);
         },
         disabled: false

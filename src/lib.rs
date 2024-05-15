@@ -49,7 +49,13 @@ impl bhtSNE {
         Self { tsne_encoder: tsne }
     }
 
-    pub fn step(&mut self) -> Result<JsValue, JsValue> {
+    /// Performs a parallel Barnes-Hut approximation of the t-SNE algorithm.
+    ///
+    /// # Arguments
+    ///
+    /// `epochs` - Sets epochs, the maximum number of fitting iterations.
+    pub fn step(&mut self, epochs: usize) -> Result<JsValue, JsValue> {
+        self.tsne_encoder.epochs = epochs;
         self.tsne_encoder.barnes_hut(|sample_a, sample_b| {
             sample_a
                 .iter()
