@@ -48,9 +48,9 @@ impl bhtSNE {
         let tsne = tsne_encoder::new(flattened_array, d);
         Self { tsne_encoder: tsne }
     }
-    #[wasm_bindgen]
-    pub fn step(&mut self, theta: f32) {
-        self.tsne_encoder.barnes_hut(theta, |sample_a, sample_b| {
+
+    pub fn step(&mut self) -> Result<JsValue, JsValue> {
+        self.tsne_encoder.barnes_hut(|sample_a, sample_b| {
             sample_a
                 .iter()
                 .zip(sample_b.iter())
@@ -58,10 +58,111 @@ impl bhtSNE {
                 .sum::<f32>()
                 .sqrt()
         });
+
+        let embeddings: Vec<f32> = self.tsne_encoder.y.iter().map(|x| x.0).collect();
+        let samples: Vec<Vec<f32>> = embeddings
+            .chunks(self.tsne_encoder.no_dims)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+
+        Ok(serde_wasm_bindgen::to_value(&samples)?)
     }
-    #[wasm_bindgen]
-    pub fn get_solution(&self) -> Vec<f32> {
-        self.tsne_encoder.y.iter().map(|x| x.0).collect()
+
+    /// Sets a new learning rate.
+    ///
+    /// # Arguments
+    ///
+    /// `learning_rate` - new value for the learning rate.
+    pub fn learning_rate(&mut self, learning_rate: f32) {
+        self.tsne_encoder.learning_rate = learning_rate;
+    }
+
+    /// Sets new epochs, i.e the maximum number of fitting iterations.
+    ///
+    /// # Arguments
+    ///
+    /// `epochs` - new value for the epochs.
+    pub fn epochs(&mut self, epochs: usize) {
+        self.tsne_encoder.epochs = epochs;
+    }
+
+    /// Sets a new momentum.
+    ///
+    /// # Arguments
+    ///
+    /// `momentum` - new value for the momentum.
+    pub fn momentum(&mut self, momentum: f32) {
+        self.tsne_encoder.momentum = momentum;
+    }
+
+    /// Sets a new final momentum.
+    ///
+    /// # Arguments
+    ///
+    /// `final_momentum` - new value for the final momentum.
+    pub fn final_momentum(&mut self, final_momentum: f32) {
+        self.tsne_encoder.final_momentum = final_momentum;
+    }
+
+    /// Sets a new momentum switch epoch, i.e. the epoch after which the algorithm switches to
+    /// `final_momentum` for the map update.
+    ///
+    /// # Arguments
+    ///
+    /// `momentum_switch_epoch` - new value for the momentum switch epoch.
+    pub fn momentum_switch_epoch(&mut self, momentum_switch_epoch: usize) {
+        self.tsne_encoder.momentum_switch_epoch = momentum_switch_epoch;
+    }
+
+    /// Sets a new stop lying epoch, i.e. the epoch after which the P distribution values become
+    /// true, as defined in the original implementation. For epochs < `stop_lying_epoch` the values
+    /// of the P distribution are multiplied by a factor equal to `12.0`.
+    ///
+    /// # Arguments
+    ///
+    /// `stop_lying_epoch` - new value for the stop lying epoch.
+    pub fn stop_lying_epoch(&mut self, stop_lying_epoch: usize) {
+        self.tsne_encoder.stop_lying_epoch = stop_lying_epoch;
+    }
+
+    /// Sets a new theta, which determines the accuracy of the approximation. Must be **strictly greater than
+    /// 0.0**. Large values for θ increase the speed of the algorithm but decrease its accuracy.
+    /// For small values of θ it is less probable that a cell in the space partitioning tree will
+    /// be treated as a single point. For θ equal to 0.0 the method degenerates in the exact
+    /// version.
+    ///
+    /// # Arguments
+    ///
+    /// * `theta`  - new value for the theta.
+    pub fn theta(&mut self, theta: f32) {
+        assert!(
+            theta > 0.0f32,
+            "error: theta value must be greater than 0.0.
+            A value of 0.0 corresponds to using the exact version of the algorithm."
+        );
+        self.tsne_encoder.theta = theta;
+    }
+
+    /// Sets a new value for the embedding dimension.
+    ///
+    /// # Arguments
+    ///
+    /// `embedding_dim` - new value for the embedding space dimensionality.
+    pub fn embedding_dim(&mut self, embedding_dim: u8) {
+        self.tsne_encoder.embedding_dim = embedding_dim;
+    }
+
+    /// Sets a new perplexity value.
+    ///
+    /// # Arguments
+    ///
+    /// `perplexity` - new value for the perplexity. It's used so that the bandwidth of the Gaussian
+    ///  kernels, is set in such a way that the perplexity of each the conditional distribution *Pi*
+    ///  equals a predefined perplexity *u*.
+    ///
+    /// A good value for perplexity lies between 5.0 and 50.0.
+    pub fn perplexity(&mut self, perplexity: f32) {
+        self.tsne_encoder.perplexity = perplexity;
     }
 }
 
@@ -88,6 +189,8 @@ where
 {
     data: Vec<T>,
     d: usize,
+    theta: T,
+    no_dims: usize,
     learning_rate: T,
     epochs: usize,
     momentum: T,
@@ -121,6 +224,8 @@ where
         Self {
             data,
             d,
+            theta: T::from(0.5).unwrap(),
+            no_dims: 2,
             learning_rate: T::from(200.0).unwrap(),
             epochs: 1000,
             momentum: T::from(0.5).unwrap(),
@@ -154,22 +259,14 @@ where
     ///
     /// **Do note that** `metric_f` **must be a metric distance**, i.e. it must
     /// satisfy the [triangle inequality](https://en.wikipedia.org/wiki/Triangle_inequality).
-    pub fn barnes_hut<F: Fn(&&[T], &&[T]) -> T + Send + Sync>(
-        &mut self,
-        theta: T,
-        metric_f: F,
-    ) -> &mut Self {
-        // Checks that theta is valid.
-        assert!(
-            theta > T::zero(),
-            "error: theta value must be greater than 0.0.
-            A value of 0.0 corresponds to using the exact version of the algorithm."
-        );
-
+    pub fn barnes_hut<F: Fn(&&[T], &&[T]) -> T + Send + Sync>(&mut self, metric_f: F) -> &mut Self {
         let samples: Vec<&[T]> = self.data.chunks(self.d).collect::<Vec<&[T]>>();
         let tsne_builder = TsneBuilder::new(&samples);
+
         let data = tsne_builder.data;
         let n_samples = tsne_builder.data.len(); // Number of samples in data.
+
+        let theta = self.theta;
 
         // Checks that the supplied perplexity is suitable for the number of samples at hand.
         tsne::check_perplexity(&self.perplexity, &n_samples);
@@ -284,15 +381,15 @@ where
                     .enumerate()
                     .for_each(
                         |(
-                             index,
-                             (
-                                 (
-                                     ((positive_forces_row, negative_forces_row), forces_buffer_row),
-                                     q_sum,
-                                 ),
-                                 sample,
-                             ),
-                         )| {
+                            index,
+                            (
+                                (
+                                    ((positive_forces_row, negative_forces_row), forces_buffer_row),
+                                    q_sum,
+                                ),
+                                sample,
+                            ),
+                        )| {
                             tree.compute_edge_forces(
                                 index,
                                 sample,
@@ -354,93 +451,5 @@ where
         // Clears buffers used for fitting.
         tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
         self
-    }
-}
-
-impl bhtSNE {
-    /// Sets a new learning rate.
-    ///
-    /// # Arguments
-    ///
-    /// `learning_rate` - new value for the learning rate.
-    pub fn learning_rate(&mut self, learning_rate: f32) -> &mut Self {
-        self.tsne_encoder.learning_rate = learning_rate;
-        self
-    }
-
-    /// Sets new epochs, i.e the maximum number of fitting iterations.
-    ///
-    /// # Arguments
-    ///
-    /// `epochs` - new value for the epochs.
-    pub fn epochs(&mut self, epochs: usize) -> &mut Self {
-        self.tsne_encoder.epochs = epochs;
-        self
-    }
-
-    /// Sets a new momentum.
-    ///
-    /// # Arguments
-    ///
-    /// `momentum` - new value for the momentum.
-    pub fn momentum(&mut self, momentum: f32) -> &mut Self {
-        self.tsne_encoder.momentum = momentum;
-        self
-    }
-
-    /// Sets a new final momentum.
-    ///
-    /// # Arguments
-    ///
-    /// `final_momentum` - new value for the final momentum.
-    pub fn final_momentum(&mut self, final_momentum: f32) -> &mut Self {
-        self.tsne_encoder.final_momentum = final_momentum;
-        self
-    }
-
-    /// Sets a new momentum switch epoch, i.e. the epoch after which the algorithm switches to
-    /// `final_momentum` for the map update.
-    ///
-    /// # Arguments
-    ///
-    /// `momentum_switch_epoch` - new value for the momentum switch epoch.
-    pub fn momentum_switch_epoch(&mut self, momentum_switch_epoch: usize) -> &mut Self {
-        self.tsne_encoder.momentum_switch_epoch = momentum_switch_epoch;
-        self
-    }
-
-    /// Sets a new stop lying epoch, i.e. the epoch after which the P distribution values become
-    /// true, as defined in the original implementation. For epochs < `stop_lying_epoch` the values
-    /// of the P distribution are multiplied by a factor equal to `12.0`.
-    ///
-    /// # Arguments
-    ///
-    /// `stop_lying_epoch` - new value for the stop lying epoch.
-    pub fn stop_lying_epoch(&mut self, stop_lying_epoch: usize) -> &mut Self {
-        self.tsne_encoder.stop_lying_epoch = stop_lying_epoch;
-        self
-    }
-
-    /// Sets a new value for the embedding dimension.
-    ///
-    /// # Arguments
-    ///
-    /// `embedding_dim` - new value for the embedding space dimensionality.
-    pub fn embedding_dim(&mut self, embedding_dim: u8) -> &mut Self {
-        self.tsne_encoder.embedding_dim = embedding_dim;
-        self
-    }
-
-    /// Sets a new perplexity value.
-    ///
-    /// # Arguments
-    ///
-    /// `perplexity` - new value for the perplexity. It's used so that the bandwidth of the Gaussian
-    ///  kernels, is set in such a way that the perplexity of each the conditional distribution *Pi*
-    ///  equals a predefined perplexity *u*.
-    ///
-    /// A good value for perplexity lies between 5.0 and 50.0.
-    pub fn perplexity(&mut self, perplexity: f32) {
-        self.tsne_encoder.perplexity = perplexity;
     }
 }
