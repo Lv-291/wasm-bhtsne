@@ -33,7 +33,9 @@ jobs:
         toolchain: nightly-2024-04-29
         override: true
         components: rustfmt, clippy
-        target: wasm32-unknown-unknown
+
+    - name: Add rust-src component
+      run: rustup component add rust-src --toolchain nightly-2024-04-29
 
     - name: Install wasm-pack
       run: npm install -g wasm-pack
