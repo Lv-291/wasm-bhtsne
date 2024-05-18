@@ -1,0 +1,94 @@
+name: Build reusable
+
+on:
+  workflow_call:
+    inputs:
+      skipInstallBuild:
+        required: false
+        description: "Whether to skip $ pnpm install && pnpm run build"
+        type: boolean
+      nodeVersion:
+        required: false
+        description: "Version of Node.js to use"
+        type: string
+      afterBuild:
+        required: false
+        description: "Additional steps to run"
+        type: string
+
+jobs:
+  build:
+    name: Build on Node ${{ matrix.node-version }} and ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        node-version: ${{ fromJson(inputs.nodeVersion || '["18.x"]') }}
+        pnpm-version: ${{ fromJson(inputs.pnpmVersion || '["8.x"]') }}
+        os: [ubuntu-latest]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          override: true
+          components: rustfmt, clippy
+          toolchain: nightly-2024-04-29
+          targets: wasm32-unknown-unknown
+
+      - name: Add rust-src component
+        run: rustup component add rust-src --toolchain nightly-2024-04-29
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          # these represent dependencies downloaded by cargo
+          # and thus do not depend on the OS, arch nor rust version.
+          path: ~/.cargo
+          key: ${{ matrix.os }}-target-cache1-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          # these represent compiled steps of both dependencies and avro
+          # and thus are specific for a particular OS, arch and rust version.
+          path: lang/rust/target
+          key: ${{ matrix.os }}-target-cache1-stable-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install npm dependencies
+        if: ${{ inputs.skipInstallBuild == false }}
+        run: npm ci
+
+      - name: Cargo update
+        run: cargo update
+
+      - name: Build
+        if: ${{ inputs.skipInstallBuild == false }}
+        run: npm run build
+
+
+      - name: Wasm-pack test firefox
+        run: wasm-pack test --headless --firefox
+
+      - name: Wasm-pack test chrome
+        run: wasm-pack test --headless --chrome
+
+ #     - name: Install latest firefox
+ #       run: chmod +x ./scripts/browser_dependencies.sh && ./scripts/browser_dependencies.sh
+
+      - name: Run after build
+        if: ${{ inputs.afterBuild != '' }}
+        run: /bin/bash -c "${{ inputs.afterBuild }}"

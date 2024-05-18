@@ -1,50 +1,11 @@
-name: Build and Test
+name: Build and test
 
-on:
-  push:
-    branches:
-      - develop
-      - master
-  pull_request:
-    branches:
-      - develop
-      - master
+on: [workflow_call]
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [16.x]
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: ${{ matrix.node-version }}
-
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly-2024-04-29
-        override: true
-        components: rustfmt, clippy
-
-    - name: Add rust-src component
-      run: rustup component add rust-src --toolchain nightly-2024-04-29
-
-    - name: Install wasm-pack
-      run: npm install -g wasm-pack
-
-    - name: Install dependencies
-      run: npm install
-
-    - name: Build the package
-      run: npm run build
-
-    - name: Run tests
-      run: npm run test
+  build_typecheck_test:
+    name: Typecheck and test
+    uses: ./.github/workflows/build-reusable.yml
+    with:
+      afterBuild: npm run test
+    secrets: inherit
