@@ -1,6 +1,6 @@
 name: Build and test
 
-on: [workflow_call]
+on: push
 
 jobs:
   build_typecheck_test:

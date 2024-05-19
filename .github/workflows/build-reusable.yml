@@ -23,11 +23,13 @@ jobs:
     strategy:
       matrix:
         node-version: ${{ fromJson(inputs.nodeVersion || '["18.x"]') }}
-        pnpm-version: ${{ fromJson(inputs.pnpmVersion || '["8.x"]') }}
         os: [ubuntu-latest]
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+
+      - uses: browser-actions/setup-chrome@v1
+        with:
+          install-dependencies: true
+      - uses: nanasess/setup-chromedriver@master
 
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -72,22 +74,9 @@ jobs:
         if: ${{ inputs.skipInstallBuild == false }}
         run: npm ci
 
-      - name: Cargo update
-        run: cargo update
-
       - name: Build
         if: ${{ inputs.skipInstallBuild == false }}
         run: npm run build
-
-
-      - name: Wasm-pack test firefox
-        run: wasm-pack test --headless --firefox
-
-      - name: Wasm-pack test chrome
-        run: wasm-pack test --headless --chrome
-
- #     - name: Install latest firefox
- #       run: chmod +x ./scripts/browser_dependencies.sh && ./scripts/browser_dependencies.sh
 
       - name: Run after build
         if: ${{ inputs.afterBuild != '' }}
