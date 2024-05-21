@@ -3,12 +3,5 @@
     "build": {
         "dockerfile": "Dockerfile",
         "context": "."
-    },
-    "settings": {
-        "terminal.integrated.shell.linux": "/bin/bash"
-    },
-    "extensions": [
-        "rust-lang.rust"
-    ],
-    "remoteUser": "vscode"
+    }
 }
