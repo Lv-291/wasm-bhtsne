@@ -11,6 +11,11 @@ This is the wasm version of the [bhtsne](https://github.com/frjnn/bhtsne) crate.
 ## Features
 - Harnesses multi-threading capabilities through [wasm-bindgen-rayon](https://github.com/RReverser/wasm-bindgen-rayon).
 
+## Requirements
+To use the multithreading feature, you need to enable `SharedArrayBuffer` on the Web. As stated in the [wasm-bindgen-rayon readme](https://github.com/RReverser/wasm-bindgen-rayon/blob/main/README.md):
+
+In order to use `SharedArrayBuffer` on the Web, you need to enable [cross-origin isolation policies](https://web.dev/coop-coep/). Check out the linked article for details.
+
 ## Installation
 ```shell
 npm i wasm-bhtsne
