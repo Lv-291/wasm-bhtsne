@@ -1,0 +1,17 @@
+{
+    "name": "Rust wasm Dev Container",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "."
+    },
+    "settings": {
+        "terminal.integrated.shell.linux": "/bin/bash"
+    },
+    "extensions": [
+        "rust-lang.rust",
+        "ms-vscode.cpptools",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+    ],
+    "remoteUser": "vscode"
+}
