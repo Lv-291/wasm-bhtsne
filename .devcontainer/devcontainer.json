@@ -8,10 +8,7 @@
         "terminal.integrated.shell.linux": "/bin/bash"
     },
     "extensions": [
-        "rust-lang.rust",
-        "ms-vscode.cpptools",
-        "esbenp.prettier-vscode",
-        "dbaeumer.vscode-eslint"
+        "rust-lang.rust"
     ],
     "remoteUser": "vscode"
 }
