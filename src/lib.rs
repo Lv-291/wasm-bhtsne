@@ -36,16 +36,8 @@ impl bhtSNE {
     #[wasm_bindgen(constructor)]
     pub fn new(data: JsValue) -> Self {
         set_panic_hook();
-
         let converted_data: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(data).unwrap();
-        let d: usize = converted_data[0].len();
-
-        let flattened_array: Vec<f32> = converted_data
-            .into_par_iter()
-            .flat_map(|inner_vec| inner_vec.into_par_iter())
-            .collect();
-
-        let tsne = tsne_encoder::new(flattened_array, d);
+        let tsne = tsne_encoder::new(converted_data);
         Self { tsne_encoder: tsne }
     }
 
@@ -54,9 +46,11 @@ impl bhtSNE {
     /// # Arguments
     ///
     /// `epochs` - Sets epochs, the maximum number of fitting iterations.
-    pub fn step(&mut self, epochs: usize) -> Result<JsValue, JsValue> {
-        self.tsne_encoder.epochs = epochs;
-        self.tsne_encoder.barnes_hut(|sample_a, sample_b| {
+    pub fn step(&mut self) -> Result<JsValue, JsValue> {
+        // self.tsne_encoder.epochs = epochs;
+       // self.tsne_encoder.barnes_hut_data()
+       // self.tsne_encoder.barnes_hut_data(
+        self.tsne_encoder.barnes_hut_data(|sample_a, sample_b| {
             sample_a
                 .iter()
                 .zip(sample_b.iter())
@@ -64,6 +58,10 @@ impl bhtSNE {
                 .sum::<f32>()
                 .sqrt()
         });
+
+        for _x in 0..1000 {
+            self.tsne_encoder.run();
+        }
 
         let embeddings: Vec<f32> = self.tsne_encoder.y.iter().map(|x| x.0).collect();
         let samples: Vec<Vec<f32>> = embeddings
@@ -80,7 +78,7 @@ impl bhtSNE {
     ///
     /// `learning_rate` - new value for the learning rate.
     pub fn learning_rate(&mut self, learning_rate: f32) {
-        self.tsne_encoder.learning_rate = learning_rate;
+        self.tsne_encoder.learning_rate(learning_rate);
     }
 
     /// Sets new epochs, i.e the maximum number of fitting iterations.
@@ -89,7 +87,7 @@ impl bhtSNE {
     ///
     /// `epochs` - new value for the epochs.
     pub fn epochs(&mut self, epochs: usize) {
-        self.tsne_encoder.epochs = epochs;
+        self.tsne_encoder.epochs(epochs);
     }
 
     /// Sets a new momentum.
@@ -154,7 +152,7 @@ impl bhtSNE {
     /// # Arguments
     ///
     /// `embedding_dim` - new value for the embedding space dimensionality.
-    pub fn embedding_dim(&mut self, embedding_dim: u8) {
+    pub fn embedding_dim(&mut self, embedding_dim: usize) {
         self.tsne_encoder.embedding_dim = embedding_dim;
     }
 
@@ -173,15 +171,15 @@ impl bhtSNE {
 }
 
 struct TsneBuilder<'data, U>
-where
-    U: Send + Sync,
+    where
+        U: Send + Sync,
 {
     data: &'data [U],
 }
 
 impl<'data, U> TsneBuilder<'data, U>
-where
-    U: Send + Sync,
+    where
+        U: Send + Sync,
 {
     pub fn new(data: &'data [U]) -> Self {
         Self { data }
@@ -190,20 +188,21 @@ where
 
 #[allow(non_camel_case_types)]
 pub struct tsne_encoder<T>
-where
-    T: Send + Sync + Float + Sum + DivAssign + MulAssign + AddAssign + SubAssign,
+    where
+        T: Send + Sync + Float + Sum + DivAssign + MulAssign + AddAssign + SubAssign,
 {
     data: Vec<T>,
     d: usize,
     theta: T,
     no_dims: usize,
     learning_rate: T,
+  //  max_epochs: usize,
     epochs: usize,
     momentum: T,
     final_momentum: T,
     momentum_switch_epoch: usize,
     stop_lying_epoch: usize,
-    embedding_dim: u8,
+    embedding_dim: usize,
     perplexity: T,
     p_values: Vec<tsne::Aligned<T>>,
     p_rows: Vec<usize>,
@@ -212,11 +211,17 @@ where
     dy: Vec<tsne::Aligned<T>>,
     uy: Vec<tsne::Aligned<T>>,
     gains: Vec<tsne::Aligned<T>>,
+    positive_forces: Vec<tsne::Aligned<T>>,
+    negative_forces: Vec<tsne::Aligned<T>>,
+    forces_buffer: Vec<tsne::Aligned<T>>,
+    q_sums: Vec<tsne::Aligned<T>>,
+    means: Vec<T>,
+    n_samples: usize
 }
 
 impl<T> tsne_encoder<T>
-where
-    T: Float
+    where
+        T: Float
         + Send
         + Sync
         + AsPrimitive<usize>
@@ -226,14 +231,22 @@ where
         + MulAssign
         + SubAssign,
 {
-    pub fn new(data: Vec<T>, d: usize) -> Self {
+    pub fn new(data: Vec<Vec<T>>) -> Self {
+        let d: usize = data[0].len();
+
+        let flattened_array: Vec<T> = data
+            .into_par_iter()
+            .flat_map(|inner_vec| inner_vec.into_par_iter())
+            .collect();
+
         Self {
-            data,
+            data: flattened_array,
             d,
             theta: T::from(0.5).unwrap(),
             no_dims: 2,
             learning_rate: T::from(200.0).unwrap(),
-            epochs: 1000,
+         //   max_epochs: 1000,
+            epochs: 0,
             momentum: T::from(0.5).unwrap(),
             final_momentum: T::from(0.8).unwrap(),
             momentum_switch_epoch: 250,
@@ -247,7 +260,16 @@ where
             dy: Vec::new(),
             uy: Vec::new(),
             gains: Vec::new(),
+            positive_forces: Vec::new(),
+            negative_forces: Vec::new(),
+            forces_buffer: Vec::new(),
+            q_sums: Vec::new(),
+            means: Vec::new(),
+            n_samples: 0,
+
         }
+
+
     }
 
     /// Performs a parallel Barnes-Hut approximation of the t-SNE algorithm.
@@ -265,25 +287,23 @@ where
     ///
     /// **Do note that** `metric_f` **must be a metric distance**, i.e. it must
     /// satisfy the [triangle inequality](https://en.wikipedia.org/wiki/Triangle_inequality).
-    pub fn barnes_hut<F: Fn(&&[T], &&[T]) -> T + Send + Sync>(&mut self, metric_f: F) -> &mut Self {
+    pub fn barnes_hut_data<F: Fn(&&[T], &&[T]) -> T + Send + Sync>(&mut self, metric_f: F) {
         let samples: Vec<&[T]> = self.data.chunks(self.d).collect::<Vec<&[T]>>();
         let tsne_builder = TsneBuilder::new(&samples);
 
         let data = tsne_builder.data;
-        let n_samples = tsne_builder.data.len(); // Number of samples in data.
-
-        let theta = self.theta;
+        self.n_samples = tsne_builder.data.len(); // Number of samples in data.
 
         // Checks that the supplied perplexity is suitable for the number of samples at hand.
-        tsne::check_perplexity(&self.perplexity, &n_samples);
+        tsne::check_perplexity(&self.perplexity, &self.n_samples);
 
-        let embedding_dim = self.embedding_dim as usize;
+        let embedding_dim = self.embedding_dim;
         // Number of  points ot consider when approximating the conditional distribution P.
         let n_neighbors: usize = (T::from(3.0).unwrap() * self.perplexity).as_();
         // NUmber of entries in gradient and gains matrices.
-        let grad_entries = n_samples * embedding_dim;
+        let grad_entries = self.n_samples * embedding_dim;
         // Number of entries in pairwise measures matrices.
-        let pairwise_entries = n_samples * n_neighbors;
+        let pairwise_entries = self.n_samples * n_neighbors;
 
         // Prepare buffers
         tsne::prepare_buffers(
@@ -346,7 +366,7 @@ where
             &mut self.p_columns,
             p_columns,
             &mut self.p_values,
-            n_samples,
+            self.n_samples,
             &n_neighbors,
         );
 
@@ -357,105 +377,197 @@ where
         tsne::random_init(&mut self.y);
 
         // Prepares buffers for Barnes-Hut algorithm.
-        let mut positive_forces: Vec<tsne::Aligned<T>> = vec![T::zero().into(); grad_entries];
-        let mut negative_forces: Vec<tsne::Aligned<T>> = vec![T::zero().into(); grad_entries];
-        let mut forces_buffer: Vec<tsne::Aligned<T>> = vec![T::zero().into(); grad_entries];
-        let mut q_sums: Vec<tsne::Aligned<T>> = vec![T::zero().into(); n_samples];
+        self.positive_forces = vec![T::zero().into(); grad_entries];
+        self.negative_forces = vec![T::zero().into(); grad_entries];
+        self.forces_buffer = vec![T::zero().into(); grad_entries];
+        self.q_sums = vec![T::zero().into(); self.n_samples];
 
         // Vector used to store the mean values for each embedding dimension. It's used
         // to make the solution zero mean.
-        let mut means: Vec<T> = vec![T::zero(); embedding_dim];
+        self.means = vec![T::zero(); embedding_dim];
+        self.epochs = 0;
 
-        // Main Training loop.
-        for epoch in 0..self.epochs {
-            {
-                // Construct space partitioning tree on current embedding.
-                let tree = tsne::SPTree::new(&embedding_dim, &self.y, &n_samples);
-                // Check if the SPTree is correct.
-                debug_assert!(tree.is_correct(), "error: SPTree is not correct.");
+    }
 
-                // Computes forces using the Barnes-Hut algorithm in parallel.
-                // Each chunk of positive_forces and negative_forces is associated to a distinct
-                // embedded sample in y. As a consequence of this the computation can be done in
-                // parallel.
-                positive_forces
-                    .par_chunks_mut(embedding_dim)
-                    .zip(negative_forces.par_chunks_mut(embedding_dim))
-                    .zip(forces_buffer.par_chunks_mut(embedding_dim))
-                    .zip(q_sums.par_iter_mut())
-                    .zip(self.y.par_chunks(embedding_dim))
-                    .enumerate()
-                    .for_each(
-                        |(
+    // Main Training loop.
+    pub fn run(&mut self) -> &mut Self {
+
+        let embedding_dim = self.embedding_dim;
+
+        self.epochs += 1;
+        {
+            // Construct space partitioning tree on current embedding.
+            let tree = tsne::SPTree::new(&embedding_dim, &self.y, &self.n_samples);
+            // Check if the SPTree is correct.
+            debug_assert!(tree.is_correct(), "error: SPTree is not correct.");
+
+            // Computes forces using the Barnes-Hut algorithm in parallel.
+            // Each chunk of positive_forces and negative_forces is associated to a distinct
+            // embedded sample in y. As a consequence of this the computation can be done in
+            // parallel.
+            self.positive_forces
+                .par_chunks_mut(embedding_dim)
+                .zip(self.negative_forces.par_chunks_mut(embedding_dim))
+                .zip(self.forces_buffer.par_chunks_mut(embedding_dim))
+                .zip(self.q_sums.par_iter_mut())
+                .zip(self.y.par_chunks(embedding_dim))
+                .enumerate()
+                .for_each(
+                    |(
+                         index,
+                         (
+                             (
+                                 ((positive_forces_row, negative_forces_row), forces_buffer_row),
+                                 q_sum,
+                             ),
+                             sample,
+                         ),
+                     )| {
+                        tree.compute_edge_forces(
                             index,
-                            (
-                                (
-                                    ((positive_forces_row, negative_forces_row), forces_buffer_row),
-                                    q_sum,
-                                ),
-                                sample,
-                            ),
-                        )| {
-                            tree.compute_edge_forces(
-                                index,
-                                sample,
-                                &self.p_rows,
-                                &self.p_columns,
-                                &self.p_values,
-                                forces_buffer_row,
-                                positive_forces_row,
-                            );
-                            tree.compute_non_edge_forces(
-                                index,
-                                &theta,
-                                negative_forces_row,
-                                forces_buffer_row,
-                                q_sum,
-                            );
-                        },
-                    );
-            }
-
-            // Compute final Barnes-Hut t-SNE gradient approximation.
-            // Reduces partial sums of Q distribution.
-            let q_sum: T = q_sums.par_iter_mut().map(|sum| sum.0).sum();
-            self.dy
-                .par_iter_mut()
-                .zip(positive_forces.par_iter_mut())
-                .zip(negative_forces.par_iter_mut())
-                .for_each(|((grad, pf), nf)| {
-                    grad.0 = pf.0 - (nf.0 / q_sum);
-                    pf.0 = T::zero();
-                    nf.0 = T::zero();
-                });
-            // Zeroes Q-sums.
-            q_sums.par_iter_mut().for_each(|sum| sum.0 = T::zero());
-
-            // Updates the embedding in parallel with gradient descent.
-            tsne::update_solution(
-                &mut self.y,
-                &self.dy,
-                &mut self.uy,
-                &mut self.gains,
-                &self.learning_rate,
-                &self.momentum,
-            );
-
-            // Make solution zero-mean.
-            tsne::zero_mean(&mut means, &mut self.y, &n_samples, &embedding_dim);
-
-            // Stop lying about the P-values if the time is right.
-            if epoch == self.stop_lying_epoch {
-                tsne::stop_lying(&mut self.p_values);
-            }
-
-            // Switches momentum if the time is right.
-            if epoch == self.momentum_switch_epoch {
-                self.momentum = self.final_momentum;
-            }
+                            sample,
+                            &self.p_rows,
+                            &self.p_columns,
+                            &self.p_values,
+                            forces_buffer_row,
+                            positive_forces_row,
+                        );
+                        tree.compute_non_edge_forces(
+                            index,
+                            &self.theta,
+                            negative_forces_row,
+                            forces_buffer_row,
+                            q_sum,
+                        );
+                    },
+                );
         }
-        // Clears buffers used for fitting.
-        tsne::clear_buffers(&mut self.dy, &mut self.uy, &mut self.gains);
+
+        // Compute final Barnes-Hut t-SNE gradient approximation.
+        // Reduces partial sums of Q distribution.
+        let q_sum: T = self.q_sums.par_iter_mut().map(|sum| sum.0).sum();
+        self.dy
+            .par_iter_mut()
+            .zip(self.positive_forces.par_iter_mut())
+            .zip(self.negative_forces.par_iter_mut())
+            .for_each(|((grad, pf), nf)| {
+                grad.0 = pf.0 - (nf.0 / q_sum);
+                pf.0 = T::zero();
+                nf.0 = T::zero();
+            });
+        // Zeroes Q-sums.
+        self.q_sums.par_iter_mut().for_each(|sum| sum.0 = T::zero());
+
+        // Updates the embedding in parallel with gradient descent.
+        tsne::update_solution(
+            &mut self.y,
+            &self.dy,
+            &mut self.uy,
+            &mut self.gains,
+            &self.learning_rate,
+            &self.momentum,
+        );
+
+        // Make solution zero-mean.
+        tsne::zero_mean(&mut self.means, &mut self.y, &self.n_samples, &self.embedding_dim);
+
+        // Stop lying about the P-values if the time is right.
+        if self.epochs == self.stop_lying_epoch {
+            tsne::stop_lying(&mut self.p_values);
+        }
+
+        // Switches momentum if the time is right.
+        if self.epochs == self.momentum_switch_epoch {
+            self.momentum = self.final_momentum;
+        }
+
+        self
+    }
+
+    /// Sets a new learning rate.
+    ///
+    /// # Arguments
+    ///
+    /// `learning_rate` - new value for the learning rate.
+    pub fn learning_rate(&mut self, learning_rate: T) -> &mut Self {
+        self.learning_rate = learning_rate;
+        self
+    }
+
+    /// Sets new epochs, i.e the maximum number of fitting iterations.
+    ///
+    /// # Arguments
+    ///
+    /// `epochs` - new value for the epochs.
+    pub fn epochs(&mut self, epochs: usize) -> &mut Self {
+        self.epochs = epochs;
+        self
+    }
+
+    /// Sets a new momentum.
+    ///
+    /// # Arguments
+    ///
+    /// `momentum` - new value for the momentum.
+    pub fn momentum(&mut self, momentum: T) -> &mut Self {
+        self.momentum = momentum;
+        self
+    }
+
+    /// Sets a new final momentum.
+    ///
+    /// # Arguments
+    ///
+    /// `final_momentum` - new value for the final momentum.
+    pub fn final_momentum(&mut self, final_momentum: T) -> &mut Self {
+        self.final_momentum = final_momentum;
+        self
+    }
+
+    /// Sets a new momentum switch epoch, i.e. the epoch after which the algorithm switches to
+    /// `final_momentum` for the map update.
+    ///
+    /// # Arguments
+    ///
+    /// `momentum_switch_epoch` - new value for the momentum switch epoch.
+    pub fn momentum_switch_epoch(&mut self, momentum_switch_epoch: usize) -> &mut Self {
+        self.momentum_switch_epoch = momentum_switch_epoch;
+        self
+    }
+
+    /// Sets a new stop lying epoch, i.e. the epoch after which the P distribution values become
+    /// true, as defined in the original implementation. For epochs < `stop_lying_epoch` the values
+    /// of the P distribution are multiplied by a factor equal to `12.0`.
+    ///
+    /// # Arguments
+    ///
+    /// `stop_lying_epoch` - new value for the stop lying epoch.
+    pub fn stop_lying_epoch(&mut self, stop_lying_epoch: usize) -> &mut Self {
+        self.stop_lying_epoch = stop_lying_epoch;
+        self
+    }
+
+    /// Sets a new value for the embedding dimension.
+    ///
+    /// # Arguments
+    ///
+    /// `embedding_dim` - new value for the embedding space dimensionality.
+    pub fn embedding_dim(&mut self, embedding_dim: usize) -> &mut Self {
+        self.embedding_dim = embedding_dim;
+        self
+    }
+
+    /// Sets a new perplexity value.
+    ///
+    /// # Arguments
+    ///
+    /// `perplexity` - new value for the perplexity. It's used so that the bandwidth of the Gaussian
+    ///  kernels, is set in such a way that the perplexity of each the conditional distribution *Pi*
+    ///  equals a predefined perplexity *u*.
+    ///
+    /// A good value for perplexity lies between 5.0 and 50.0.
+    pub fn perplexity(&mut self, perplexity: T) -> &mut Self {
+        self.perplexity = perplexity;
         self
     }
 }
