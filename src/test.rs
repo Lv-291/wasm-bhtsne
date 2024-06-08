@@ -14,9 +14,10 @@ const NO_DIMS: u8 = 2;
 #[wasm_bindgen_test]
 #[cfg(not(tarpaulin_include))]
 fn set_learning_rate() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
+    let data_rs: Vec<Vec<f32>> = vec![vec![0.], vec![0.], vec![0.]];
     let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
     let mut tsne: bhtSNE = bhtSNE::new(data_js);
+    tsne.perplexity(0.);
     tsne.learning_rate(15.);
     assert_eq!(tsne.tsne_encoder.learning_rate, 15.);
 }
@@ -140,8 +141,11 @@ fn barnes_hut_tsne() {
     let data_js: JsValue = serde_wasm_bindgen::to_value(&samples).unwrap();
 
     let mut tsne: bhtSNE = bhtSNE::new(data_js);
-
-    let embedding_js = tsne.step().unwrap();
+    // tsne.perplexity(10.0);
+    for _x in 0..1000 {
+        tsne.step();
+    }
+    let embedding_js = tsne.get_solution().unwrap();
     let embedding_rs: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(embedding_js).unwrap();
     let flattened_array: Vec<f32> = embedding_rs
         .into_par_iter()
@@ -158,7 +162,7 @@ fn barnes_hut_tsne() {
             &tsne.tsne_encoder.p_values,
             &tsne.tsne_encoder.y,
             &samples.len(),
-            &(tsne.tsne_encoder.embedding_dim as usize),
+            &(tsne.tsne_encoder.embedding_dim),
             &THETA
         ) < 5.0
     );

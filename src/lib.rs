@@ -26,6 +26,8 @@ use std::{
 /// t-distributed stochastic neighbor embedding. Provides a parallel implementation of both the
 /// exact version of the algorithm and the tree accelerated one leveraging space partitioning trees.
 
+
+
 #[wasm_bindgen]
 #[allow(non_camel_case_types)]
 pub struct bhtSNE {
@@ -37,7 +39,16 @@ impl bhtSNE {
     pub fn new(data: JsValue) -> Self {
         set_panic_hook();
         let converted_data: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(data).unwrap();
-        let tsne = tsne_encoder::new(converted_data);
+        let mut tsne = tsne_encoder::new(converted_data);
+
+        tsne.barnes_hut_data(|sample_a, sample_b| {
+            sample_a
+                .iter()
+                .zip(sample_b.iter())
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f32>()
+                .sqrt()
+        });
         Self { tsne_encoder: tsne }
     }
 
@@ -46,23 +57,11 @@ impl bhtSNE {
     /// # Arguments
     ///
     /// `epochs` - Sets epochs, the maximum number of fitting iterations.
-    pub fn step(&mut self) -> Result<JsValue, JsValue> {
-        // self.tsne_encoder.epochs = epochs;
-       // self.tsne_encoder.barnes_hut_data()
-       // self.tsne_encoder.barnes_hut_data(
-        self.tsne_encoder.barnes_hut_data(|sample_a, sample_b| {
-            sample_a
-                .iter()
-                .zip(sample_b.iter())
-                .map(|(a, b)| (a - b).powi(2))
-                .sum::<f32>()
-                .sqrt()
-        });
+    pub fn step(&mut self) {
+        self.tsne_encoder.run();
+    }
 
-        for _x in 0..1000 {
-            self.tsne_encoder.run();
-        }
-
+    pub fn get_solution(&mut self) -> Result<JsValue, JsValue> {
         let embeddings: Vec<f32> = self.tsne_encoder.y.iter().map(|x| x.0).collect();
         let samples: Vec<Vec<f32>> = embeddings
             .chunks(self.tsne_encoder.no_dims)
@@ -196,7 +195,6 @@ pub struct tsne_encoder<T>
     theta: T,
     no_dims: usize,
     learning_rate: T,
-  //  max_epochs: usize,
     epochs: usize,
     momentum: T,
     final_momentum: T,
@@ -245,7 +243,6 @@ impl<T> tsne_encoder<T>
             theta: T::from(0.5).unwrap(),
             no_dims: 2,
             learning_rate: T::from(200.0).unwrap(),
-         //   max_epochs: 1000,
             epochs: 0,
             momentum: T::from(0.5).unwrap(),
             final_momentum: T::from(0.8).unwrap(),
