@@ -20,6 +20,7 @@ To use the multithreading feature, you need to enable `SharedArrayBuffer` on the
 In order to use `SharedArrayBuffer` on the Web, you need to enable [cross-origin isolation policies](https://web.dev/coop-coep/). Check out the linked article for details.
 
 ## Installation
+Install the [wasm-bhtsne npm package](https://www.npmjs.com/package/wasm-bhtsne):
 ```shell
 npm i wasm-bhtsne
 ```
