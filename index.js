@@ -1,9 +1,9 @@
 import { threads } from 'wasm-feature-detect';
-
 function createRandomMatrix(rows, columns) {
-    return Array.from({ length: rows }, () =>
-        Array.from({ length: columns }, () => Math.random())
-    );
+  return Array.from({ length: rows }, () =>
+      Array.from({ length: columns }, () => Math.random())
+
+  );
 }
 
 
@@ -14,23 +14,28 @@ function createRandomMatrix(rows, columns) {
   if (await threads()) {
     await multiThread.initThreadPool(navigator.hardwareConcurrency);
   }
-
   Object.assign(document.getElementById("wasm-bhtsne"), {
     async onclick() {
       const timeOutput = /** @type {HTMLOutputElement} */ (
           document.getElementById('time')
       );
 
+      const opt = {
+        learning_rate: 150.0,
+        perplexity: 30.0,
+        theta: 0.6
+      };
+
       // create random points and dimensions
       const data = createRandomMatrix(5000, 512);
-      
+
       const start = performance.now();
-      let tsne_encoder = new multiThread.bhtSNE(data);
+      let tsne_encoder = new multiThread.bhtSNEf32(data, opt);
 
       let compressed_vectors;
       for (let i = 0; i < 1000; i++) {
-        tsne_encoder.step()
-        compressed_vectors = tsne_encoder.get_solution();
+        compressed_vectors = tsne_encoder.step(1)
+        /* …do something with `compressed_vectors`… */
       }
 
       const time = performance.now() - start;
