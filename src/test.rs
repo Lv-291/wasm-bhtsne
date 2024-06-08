@@ -1,95 +1,16 @@
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use super::{bhtSNE, tsne};
+use super::{bhtSNEf32, tsne};
 use wasm_bindgen::JsValue;
 
 extern crate wasm_bindgen_test;
+use crate::hyperparameters::Hyperparameters;
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 const D: usize = 4;
-const THETA: f32 = 0.5;
+
 const NO_DIMS: u8 = 2;
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_learning_rate() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.learning_rate(15.);
-    assert_eq!(tsne.tsne_encoder.learning_rate, 15.);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_epochs() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.epochs(15);
-    assert_eq!(tsne.tsne_encoder.epochs, 15);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_momentum() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.momentum(15.);
-    assert_eq!(tsne.tsne_encoder.momentum, 15.);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_final_momentum() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.final_momentum(15.);
-    assert_eq!(tsne.tsne_encoder.final_momentum, 15.);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_momentum_switch_epoch() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.momentum_switch_epoch(15);
-    assert_eq!(tsne.tsne_encoder.momentum_switch_epoch, 15);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_stop_lying_epoch() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.stop_lying_epoch(15);
-    assert_eq!(tsne.tsne_encoder.stop_lying_epoch, 15);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_embedding_dim() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.embedding_dim(3);
-    assert_eq!(tsne.tsne_encoder.embedding_dim, 3);
-}
-
-#[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
-fn set_perplexity() {
-    let data_rs: Vec<Vec<f32>> = vec![vec![0.]];
-    let data_js: JsValue = serde_wasm_bindgen::to_value(&data_rs).unwrap();
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
-    tsne.perplexity(15.);
-    assert_eq!(tsne.tsne_encoder.perplexity, 15.);
-}
 
 #[wasm_bindgen_test]
 #[cfg(not(tarpaulin_include))]
@@ -139,9 +60,25 @@ fn barnes_hut_tsne() {
     let samples: Vec<Vec<f32>> = data.chunks(D).map(|chunk| chunk.to_vec()).collect();
     let data_js: JsValue = serde_wasm_bindgen::to_value(&samples).unwrap();
 
-    let mut tsne: bhtSNE = bhtSNE::new(data_js);
+    let opt: Hyperparameters<f32> = Hyperparameters {
+        learning_rate: 200.0,
+        momentum: 0.5,
+        final_momentum: 0.8,
+        momentum_switch_epoch: 250,
+        stop_lying_epoch: 250,
+        theta: 0.5,
+        embedding_dim: 2,
+        perplexity: 20.0,
+    };
 
-    let embedding_js = tsne.step(1000).unwrap();
+    let opt_js: JsValue = serde_wasm_bindgen::to_value(&opt).unwrap();
+
+    let mut tsne: bhtSNEf32 = bhtSNEf32::new(data_js, opt_js);
+
+    for _x in 0..1000 {
+        tsne.step(1).unwrap();
+    }
+    let embedding_js = tsne.step(1).unwrap();
     let embedding_rs: Vec<Vec<f32>> = serde_wasm_bindgen::from_value(embedding_js).unwrap();
     let flattened_array: Vec<f32> = embedding_rs
         .into_par_iter()
@@ -158,8 +95,8 @@ fn barnes_hut_tsne() {
             &tsne.tsne_encoder.p_values,
             &tsne.tsne_encoder.y,
             &samples.len(),
-            &(tsne.tsne_encoder.embedding_dim as usize),
-            &THETA
+            &(tsne.tsne_encoder.embedding_dim),
+            &tsne.tsne_encoder.theta,
         ) < 5.0
     );
 }
