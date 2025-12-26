@@ -13,11 +13,10 @@ const D: usize = 4;
 const NO_DIMS: u8 = 2;
 
 #[wasm_bindgen_test]
-#[cfg(not(tarpaulin_include))]
 fn barnes_hut_tsne() {
     // TODO: implementing I/O for testing with iris.csv and maybe a pkg feature
 
-    // for now this don't work, wasm doesn't support I/O out of the box
+    // for now this doesn't work, wasm doesn't support I/O out of the box
     //   let data: Vec<f32> =
     //      crate::load_csv("iris.csv", true, Some(&[4]), |float| float.parse().unwrap()).unwrap();
 

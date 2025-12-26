@@ -45,11 +45,11 @@ jobs:
         with:
           override: true
           components: rustfmt, clippy
-          toolchain: nightly-2024-04-29
+          toolchain: nightly-2025-11-15
           targets: wasm32-unknown-unknown
 
       - name: Add rust-src component
-        run: rustup component add rust-src --toolchain nightly-2024-04-29
+        run: rustup component add rust-src --toolchain nightly-2025-11-15
 
       - name: Cache Cargo
         uses: actions/cache@v3

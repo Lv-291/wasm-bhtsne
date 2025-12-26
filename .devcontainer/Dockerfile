@@ -18,13 +18,14 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs
 
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2024-04-29
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2025-11-15
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup component add rustfmt clippy rust-src --toolchain nightly-2024-04-29
+
+RUN rustup component add rustfmt clippy rust-src --toolchain nightly-2025-11-15 \
+    && rustup target add wasm32-unknown-unknown --toolchain nightly-2025-11-15
 
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 RUN curl -fsSL https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' \
     && apt-get update && apt-get install -y google-chrome-stable
-
