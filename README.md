@@ -29,50 +29,59 @@ npm i wasm-bhtsne
 
 ```javascript
 import { threads } from 'wasm-feature-detect';
+import init, { initThreadPool, bhtSNEf32 } from 'wasm-bhtsne';
 
-function createRandomMatrix(rows, columns) {
-    return Array.from({ length: rows }, () =>
-        Array.from({ length: columns }, () => Math.random())
+// Configuration
+const config = {
+    n_samples: 5000,
+    n_dims: 512,
+    iterations: 1000
+};
+
+// Helper to generate example data (Rust expects Vec<Vec<f32>>)
+const generateData = (rows, cols) =>
+    Array.from({ length: rows }, () =>
+        Array.from({ length: cols }, () => Math.random())
     );
-}
 
-(async function initMultiThread() {
-    const multiThread = await import('./pkg-parallel/wasm_bhtsne.js');
-    await multiThread.default();
+(async () => {
+    // Initialize WASM module
+    await init();
+
+    // Check and initialize threads
     if (await threads()) {
-        console.log("Browser supports threads");
-        await multiThread.initThreadPool(navigator.hardwareConcurrency);
+        console.log(`Browser supports threads. Using ${navigator.hardwareConcurrency} cores.`);
+        await initThreadPool(navigator.hardwareConcurrency);
     } else {
-        console.log("Browser does not support threads");
+        console.log("Browser does not support threads.");
+        return;
     }
 
-    Object.assign(document.getElementById("wasm-bhtsne"), {
-        async onclick() {
+    // Set hyperparameters
+    const opt = {
+        learning_rate: 150.0,
+        perplexity: 30.0,
+        theta: 0.5,
+    };
 
-            // create random points and dimensions
-            const data = createRandomMatrix(5000, 512);
+    try {
+        const data = generateData(config.n_samples, config.n_dims);
 
-            // Example of setting hyperparameters
-            const opt = {
-                learning_rate: 150.0,
-                perplexity: 30.0,
-                theta: 0.6
-            };
-            
-            // let tsne_encoder = new multiThread.bhtSNEf64(data, opt);
-            // or
-            let tsne_encoder = new multiThread.bhtSNEf32(data, opt);
-            let compressed_vectors;
+        // Instantiate the encoder
+        const tsneEncoder = new bhtSNEf32(data, opt);
 
-            for (let i = 0; i < 1000; i++) {
-                compressed_vectors = tsne_encoder.step(1)
-                /* …do something with `compressed_vectors`… */
-            }
+        let embedding;
 
-            console.log("Compressed Vectors:", compressed_vectors);
-        },
-        disabled: false
-    });
+        // Run the algorithm
+        for (let i = 0; i < config.iterations; i++) {
+            embedding = tsneEncoder.step(1);
+        }
+
+        console.log("Final Embedding:", embedding);
+
+    } catch (e) {
+        console.error("Error during execution:", e);
+    }
 })();
 ```
 
