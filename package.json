@@ -1,23 +1,27 @@
 {
   "private": true,
-    "scripts": {
-      "build:wasm-st": "wasm-pack build --target web",
-      "build:wasm-mt": "cross-env RUSTFLAGS=\"-C target-feature=+atomics,+bulk-memory -Clink-arg=--shared-memory -Clink-arg=--max-memory=1073741824 -Clink-arg=--import-memory -Clink-arg=--export=__wasm_init_tls -Clink-arg=--export=__tls_size -Clink-arg=--export=__tls_align -Clink-arg=--export=__tls_base\" wasm-pack build --target web --out-dir pkg-parallel -- --features parallel -Z build-std=panic_abort,std",
-      "build:wasm": "run-p build:wasm-st build:wasm-mt",
-      "build": "npm run build:wasm && webpack build",
-      "serve": "npm run build && serve dist --config ../serve.json",
-      "test:parallel": "RUST_BACKTRACE=1 wasm-pack test --headless --chrome -- --features parallel",
-      "test": "RUST_BACKTRACE=1 wasm-pack test --headless --chrome"
-    },
+  "scripts": {
+    "build:wasm-st": "wasm-pack build --target web",
+    "build:wasm-mt": "cross-env RUSTFLAGS=\"-C target-feature=+atomics,+bulk-memory -Clink-arg=--shared-memory -Clink-arg=--max-memory=1073741824 -Clink-arg=--import-memory -Clink-arg=--export=__wasm_init_tls -Clink-arg=--export=__tls_size -Clink-arg=--export=__tls_align -Clink-arg=--export=__tls_base\" wasm-pack build --target web --out-dir pkg-parallel -- --features parallel -Z build-std=panic_abort,std",
+    "build:wasm": "run-p build:wasm-st build:wasm-mt",
+    "build": "npm run build:wasm && webpack build",
+    "serve": "npm run build && serve dist --config ../serve.json",
+    "test:parallel": "RUST_BACKTRACE=1 wasm-pack test --headless --chrome -- --features parallel",
+    "test": "RUST_BACKTRACE=1 wasm-pack test --headless --chrome"
+  },
   "overrides": {
-    "axios": "^1.7.9"
+    "axios": "^1.15.0",
+    "tar": "^7.5.11",
+    "serialize-javascript": "^7.0.5",
+    "minimatch": "^3.1.3"
+
   },
   "devDependencies": {
-    "copy-webpack-plugin": "^12.0.2",
+    "copy-webpack-plugin": "^13.0.0",
     "cross-env": "7.0.3",
     "npm-run-all": "4.1.5",
     "wasm-pack": "0.13.1",
-    "webpack": "5.97.1",
+    "webpack": "^5.106.2",
     "webpack-cli": "6.0.1"
   },
   "dependencies": {

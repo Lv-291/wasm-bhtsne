@@ -3,5 +3,9 @@
     "build": {
         "dockerfile": "Dockerfile",
         "context": "."
-    }
+    },
+    "runArgs": [
+        "--ipc=host"
+    ],
+    "capAdd": ["SYS_ADMIN"] 
 }
